@@ -680,3 +680,36 @@ requires renewed microphone permission. It did not request approval, save or
 send audio. The temporary launchd job was removed. The existing GUI process
 remained running on its earlier executable; the user must quit/reopen the app
 and approve microphone access before real-mic acceptance of this build.
+
+### Dictionary forms and first draft release (2026-10-29)
+
+Replaced the Mac/Android dictionary text areas with preferred-spelling forms,
+Add/Edit/Remove controls, examples, automatic save and the existing 500-entry /
+120-character limits. Duplicate additions are rejected case-insensitively.
+Export and sync retain the existing array-of-strings schema. These are hints,
+not a misheard-word replacement mapping.
+
+115 Swift cases completed with zero failures (one opt-in speech fixture skipped),
+and all 50 Android unit tests plus debug lint/build passed. A signed Android
+release build and release lint passed. Local APK signature verification matched
+the newly generated permanent release certificate; the private key backup is
+outside Git, and encrypted signing secrets were configured for GitHub Actions.
+Release workflow actionlint and nine version-metadata validation checks passed.
+
+Computer-use checks on the actual Mac form used an isolated settings fixture:
+Add, Edit, Save, duplicate rejection and Remove worked, and private file readback
+confirmed the original two synthetic entries were restored. The fixture exited
+through its done-file test API. On the connected physical Realme, the production
+Android form accepted a test entry, opened Edit, saved the changed spelling and
+removed it; fresh UI showed the original empty dictionary again. No provider
+calls or key edits were performed in these form checks.
+
+Tag v0.1.0 at fefd3c5 triggered Release run 40754564894 successfully. Both Mac
+architectures and signed Android passed, and the workflow created a draft
+pre-release with three binaries and SHA256SUMS. Downloaded all assets: checksums
+passed, executable architectures matched the ZIP labels, the CI APK certificate
+matched the permanent local release certificate, and the downloaded signed Mac
+arm64 app passed all 10 packaged processing cycles. This validates actual CI
+outputs rather than only the YAML. Mac builds remain ad-hoc signed, not notarized.
+The first release APK uses a different certificate from prior debug installs;
+the draft notes explain export/uninstall/install/import and local-key re-entry.
