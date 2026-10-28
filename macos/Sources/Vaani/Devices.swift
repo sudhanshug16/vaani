@@ -108,11 +108,11 @@ final class AudioCapture {
         guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate) == noErr,
               rate > 0, rate <= 384_000,
               let source = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: true),
-              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: false),
+              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false),
               let converter = AVAudioConverter(from: source, to: target) else {
             throw VaaniError.message("Unsupported microphone format.")
         }
-        let session = InputSession(uid: microphone.id, source: source, target: target, converter: converter,
+        let session = try InputSession(uid: microphone.id, source: source, target: target, converter: converter,
                                    onChunk: onChunk, onFailure: onFailure)
         var format = source.streamDescription.pointee
         var created: AudioQueueRef?
@@ -151,14 +151,17 @@ final class AudioCapture {
         var running: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
         return AudioQueueGetProperty(queue, kAudioQueueProperty_IsRunning, &running, &size) == noErr && running != 0 && Self.currentUID(queue) == session.uid
     }
-    func stop() {
-        session?.gate.close()
+    func stop(flush: Bool = false) {
+        let wasEnabled = session?.gate.close() == true
         if let queue {
             // Synchronous disposal guarantees no more callbacks before releasing
             // their session context. A closed gate rejects late PCM immediately.
             AudioQueueStop(queue, true)
             AudioQueueDispose(queue, true)
         }
+        // Disposal has joined all audio callbacks. Explicit Finish may now drain
+        // the denoiser tail; cancellation and route failures never drain audio.
+        if flush && wasEnabled, let session { callbackQueue.sync { session.flush() } }
         queue = nil; session = nil; deviceID = nil
     }
     deinit { stop() }
@@ -188,14 +191,17 @@ final class AudioCapture {
         let source: AVAudioFormat
         let target: AVAudioFormat
         let converter: AVAudioConverter
-        var inputGain = InputGainControl()
+        let processor: SpeechAudioProcessor
         let gate = CaptureGate()
         let onChunk: (Data, Float) -> Void
         let onFailure: (String) -> Void
         init(uid: String, source: AVAudioFormat, target: AVAudioFormat, converter: AVAudioConverter,
-             onChunk: @escaping (Data, Float) -> Void, onFailure: @escaping (String) -> Void) {
+             onChunk: @escaping (Data, Float) -> Void, onFailure: @escaping (String) -> Void) throws {
             self.uid = uid; self.source = source; self.target = target; self.converter = converter
             self.onChunk = onChunk; self.onFailure = onFailure
+            do { processor = try SpeechAudioProcessor() }
+            catch { throw VaaniError.message("Speech noise processing could not initialize. Reinstall Vaani if the model is missing.") }
+            converter.primeMethod = .none
         }
         func fail(_ message: String) { if gate.close() { onFailure(message) } }
         func receive(_ queue: AudioQueueRef, _ buffer: AudioQueueBufferRef) {
@@ -212,7 +218,7 @@ final class AudioCapture {
             input.frameLength = frames
             guard let destination = input.mutableAudioBufferList.pointee.mBuffers.mData else { return }
             memcpy(destination, buffer.pointee.mAudioData, Int(buffer.pointee.mAudioDataByteSize))
-            let capacity = AVAudioFrameCount(ceil(Double(frames) * 16000 / source.sampleRate) + 16)
+            let capacity = AVAudioFrameCount(ceil(Double(frames) * 48000 / source.sampleRate) + 16)
             guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
             var supplied = false; var error: NSError?
             converter.convert(to: output, error: &error) { _, status in
@@ -220,10 +226,24 @@ final class AudioCapture {
                 supplied = true; status.pointee = .haveData; return input
             }
             guard error == nil else { fail("Microphone audio conversion failed. Partial text is preserved."); return }
-            guard let samples = output.int16ChannelData?[0], output.frameLength > 0 else { return }
-            let length = Int(output.frameLength)
-            let rms = inputGain.process(UnsafeMutableBufferPointer(start: samples, count: length))
-            gate.deliver { onChunk(Data(bytes: samples, count: length * 2), min(1, rms * 5)) }
+            guard let samples = output.floatChannelData?[0], output.frameLength > 0 else { return }
+            // RNNoise works in 10 ms frames. Keep the existing ~100 ms capture
+            // chunk for upload, preserving network message/backpressure budget.
+            var chunk = Data(); var lastLevel: Float = 0
+            do {
+                try processor.process(UnsafeBufferPointer(start: samples, count: Int(output.frameLength))) { data, level in
+                    chunk.append(data); lastLevel = level
+                }
+            } catch { fail("Speech noise processing failed. Partial text is preserved."); return }
+            if !chunk.isEmpty { gate.deliver { onChunk(chunk, lastLevel) } }
+        }
+        func flush() {
+            var chunk = Data(); var lastLevel: Float = 0
+            do {
+                try processor.finish { data, level in chunk.append(data); lastLevel = level }
+                if !chunk.isEmpty { onChunk(chunk, lastLevel) }
+            }
+            catch { onFailure("Speech audio finalization failed. Partial text is preserved.") }
         }
     }
 }

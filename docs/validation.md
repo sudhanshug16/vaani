@@ -631,3 +631,43 @@ loud speech, silence/subthreshold signal, a sudden full-scale transient after
 boost, and output independence from callback chunk boundaries. These synthetic
 tests establish DSP behavior; real speech recognition improvement and perceived
 quality on the Air remain unverified.
+
+### RNNoise suppression and waveform stability (2026-10-29)
+
+The user reported poor results and randomly jumping waveform levels after the
+gain-only change. The earlier controller could amplify background sounds; it
+did not remove noise. Added pinned RNNoise v0.2 inference and its full upstream
+model, running locally on 10 ms mono 48 kHz frames. Noise-cleaned audio is
+downsampled to mono 16 kHz PCM16 before the speech-aware gain/peak limiter and
+Sarvam upload. RNNoise speech confidence gates boost, with a 300 ms hold across
+brief speech gaps. The meter has an 80 ms rise/250 ms decay envelope based on
+processed RMS. Each recording owns its model state, converters, gain and meter.
+
+Explicit Finish drains a partial frame and v0.2's 20 ms delayed-spectrum/overlap
+tail after synchronous AudioQueue disposal. Cancel and route failure discard
+pending audio. The existing hardware smoke now also exercises explicit Finish.
+Model SHA256 is checked before the C parser, and build-macos.sh packages the
+model resource bundle and BSD license. Upstream revision, model checksum,
+reproduction instructions and two vector-header portability adjustments are
+recorded in macos/ThirdParty/rnnoise/README.vaani.md.
+
+115 Swift tests passed with the opt-in locally synthesized speech fixture
+enabled (zero failures/skips). Checks cover the production denoising/resampling
+pipeline, deterministic white noise reduction, retained synthetic speech,
+arbitrary callback boundaries, independent recording state, silence, partial
+frames/tail, full-scale/nonfinite input, corrupt/missing model rejection,
+speech-gated gain, and meter response. The white-noise fixture was reduced by
+about 73.5 dB after settling; this is a synthetic fixture result, not a general
+noise-reduction or dictation-accuracy claim. Synthetic speech output RMS was
+0.0725. Fixtures stayed in /tmp; no microphone audio or provider keys were used.
+Natural speech quality and actual room-noise/transcription improvement on Air
+still need listening/dictation acceptance.
+
+Signed packaged processing smoke passed locally and on Air for 10 independent
+processor lifetimes, with model loading, bounded mono 16 kHz PCM and finalization
+checked. Air processed ten seconds of generated noise in about 0.23 seconds;
+this check did not open the microphone, load provider keys or send audio.
+The C inference sources also passed an x86_64 macOS syntax check (baseline SSE2
+performance warnings only). Uploads retain capture-sized chunks of roughly
+100 ms rather than sending every 10 ms RNNoise frame, preserving the existing
+stream queue's buffering duration and message frequency.

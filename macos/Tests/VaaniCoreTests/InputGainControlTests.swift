@@ -2,6 +2,13 @@ import XCTest
 @testable import VaaniCore
 
 final class InputGainControlTests: XCTestCase {
+    func testNoiseConfidenceDoesNotRaiseGain() {
+        var samples = tone(0.015)
+        let original = samples
+        var control = InputGainControl()
+        samples.withUnsafeMutableBufferPointer { _ = control.process($0, speechProbability: 0) }
+        XCTAssertEqual(samples, original)
+    }
     private func tone(_ amplitude: Double, seconds: Int = 2) -> [Int16] {
         (0..<(16000 * seconds)).map { Int16((sin(Double($0) * 2 * .pi * 200 / 16000) * amplitude * 32767).rounded()) }
     }

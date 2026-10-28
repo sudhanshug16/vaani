@@ -350,7 +350,7 @@ import VaaniCore
     func stop(automaticallyPaste: Bool = true, reviewRequired: Bool = false) {
         guard phase == .listening else { return }
         Diagnostics.record(.finish, reviewRequired ? .sessionEnded : .requested, session: generation)
-        capture.stop(); level = 0; phase = .finishing
+        capture.stop(flush: true); level = 0; phase = .finishing
         let token = generation
         operation = Task { [weak self] in
             guard let self else { return }

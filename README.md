@@ -28,6 +28,8 @@ The floating panel is only a compact draggable pill: no expanded card, app name 
 
 Choose and remember microphones/profiles in Settings → Microphones. Process-private audio-engine aggregates are excluded from microphone choices; public user-created aggregates and virtual microphones remain available. Automatic setup matching follows monitors and USB devices; OS device notifications coalesce brief hub/monitor changes before choosing a new setup. Input-route or audio-format changes during recording stop capture and preserve text.
 
+Mac capture uses bundled [RNNoise](https://github.com/xiph/rnnoise) speech noise suppression locally before transcription, followed by speech-aware gain limited to 4× and peak protection. The waveform uses a smoothed level from the processed audio. The roughly 5 MB model needs no download at runtime; microphone selection and system input volume are unchanged. This reduces background noise rather than isolating one speaker from other voices.
+
 For Home and Office setups with identical hardware, select a mic, enter a name, and choose **Save as separate profile**. Switch profiles from Settings → Microphones. A manual profile stays selected across restarts and hardware changes until you choose **Automatic**. A missing preferred mic always needs a new choice.
 
 Automatic setup names join the connected monitor and USB product names (for example, `DELL + USB Hub`). Hardware IDs still determine matching; custom Home/Office names are preserved.
