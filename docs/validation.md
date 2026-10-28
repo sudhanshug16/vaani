@@ -713,3 +713,25 @@ arm64 app passed all 10 packaged processing cycles. This validates actual CI
 outputs rather than only the YAML. Mac builds remain ad-hoc signed, not notarized.
 The first release APK uses a different certificate from prior debug installs;
 the draft notes explain export/uninstall/install/import and local-key re-entry.
+
+### Release pill clipping (2026-10-29)
+
+The user's 8-second screen recording showed the capsule becoming a cropped square
+on hover/recording, with controls cut off. An isolated copy of the actual v0.1.0
+GitHub arm64 app reproduced the cause: the native panel stayed 54 x 36 points in
+both idle and synthetic listening states. The larger SwiftUI content drew inside
+the unchanged idle window. Air logs separately showed capture, processing and
+paste dispatch completing and no newer crash; those events do not prove text
+arrival in the destination editor.
+
+Replaced the constrained GeometryReader preference with explicit state-derived
+native sizes: 54 x 36 idle, 110 x 36 hover/paste controls, and 138 x 36 active.
+Button slots are fixed at 16 x 26 so platform control sizing cannot overflow
+the chosen window. State-size changes notify the existing native resize callback
+directly; bottom anchoring and nonactivating-window behavior remain in place.
+
+116 local Swift cases completed without failures (one opt-in speech fixture
+skipped). A new native-window regression test disables NSHostingView automatic
+sizing, then verifies actual native/content widths across connecting, listening,
+finishing, processing, idle and repeated state transitions. It also verifies
+height, bottom anchor and lack of keyboard/main-window focus.

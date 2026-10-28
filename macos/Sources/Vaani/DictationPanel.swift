@@ -18,9 +18,11 @@ final class DictationPanel: NSPanel {
     }
 }
 
-private struct PanelSize: PreferenceKey {
-    static var defaultValue = CGSize.zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+enum FloatingPanelLayout {
+    static func size(active: Bool, controls: Bool) -> CGSize {
+        // Face + optional two 16 pt controls/two 12 pt gaps + horizontal padding.
+        CGSize(width: (active ? 52 : 24) + (controls ? 56 : 0) + 30, height: 36)
+    }
 }
 
 private struct PanelDragRegion: NSViewRepresentable {
@@ -71,15 +73,20 @@ struct FloatingView: View {
     var resize: (CGSize) -> Void
     @State private var hovered = false
     private let surface = Color(red: 0.10, green: 0.105, blue: 0.11)
+    private var showsControls: Bool { model.active || hovered || model.isPasting }
+    private var layoutSize: CGSize { FloatingPanelLayout.size(active: model.active, controls: showsControls) }
 
     var body: some View {
         pill
+        .frame(width: layoutSize.width, height: layoutSize.height)
         .background(surface.opacity(0.98), in: Capsule())
         .overlay(Capsule().stroke(.white.opacity(0.12)))
         .fixedSize()
         .preferredColorScheme(.dark)
-        .background(GeometryReader { proxy in Color.clear.preference(key: PanelSize.self, value: proxy.size) })
-        .onPreferenceChange(PanelSize.self, perform: resize)
+        // Derive native bounds from state, not GeometryReader's constrained
+        // proposal. Older SDK-built hosts otherwise keep the idle 54 pt width
+        // while drawing the larger active/hover content inside that window.
+        .onChange(of: layoutSize, initial: true) { _, size in resize(size) }
         .onHover { hovered = $0 }
         .help(model.error ?? model.statusNotice ?? "Drag to move · tap to dictate")
     }
@@ -109,16 +116,17 @@ struct FloatingView: View {
             })
                 .help(model.error.map { "\($0) · Click for details" } ?? "Drag to move · click to dictate or finish")
                 .accessibilityLabel(model.error != nil && !model.active ? "Show dictation error details" : "Move dictation panel")
-            if model.active || hovered || model.isPasting {
-                if model.isPasting { ProgressView().controlSize(.small) }
+            if showsControls {
+                if model.isPasting { ProgressView().controlSize(.small).frame(width: 16, height: 26) }
                 else {
                     Button(action: model.toggleFromPanel) {
                         Image(systemName: model.phase == .listening ? "stop.fill" : "mic.fill")
-                    }.help(model.phase == .listening ? "Finish dictation" : "Dictate")
+                    }.frame(width: 16, height: 26).help(model.phase == .listening ? "Finish dictation" : "Dictate")
                         .accessibilityLabel(model.phase == .listening ? "Finish dictation" : "Dictate")
                         .disabled(model.active && model.phase != .listening)
                 }
                 Button(action: hide) { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                    .frame(width: 16, height: 26)
                     .help("Dismiss · Escape").accessibilityLabel("Dismiss dictation panel")
             }
         }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.9)).padding(.horizontal, 15).padding(.vertical, 5)
