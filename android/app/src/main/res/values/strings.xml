@@ -17,6 +17,7 @@
     <string name="automatic_profile">Automatic · connected hardware</string>
     <string name="microphone_summary">%1$s · %2$s</string>
     <string name="delete_failed">Editor could not delete text.</string>
+    <string name="backspace">Backspace</string>
     <string name="voice_settings">Vaani settings</string>
     <string name="switch_keyboard">Switch keyboard</string>
     <string name="insert_saved_text">Insert saved text</string>

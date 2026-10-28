@@ -139,6 +139,19 @@ class VaaniIME : InputMethodService() {
         controls.addView(insert, LinearLayout.LayoutParams(-2, dp(48)))
         cancelButton = button(getString(R.string.cancel_dictation)) { cancel() }.apply { visibility = View.GONE }
         controls.addView(cancelButton, LinearLayout.LayoutParams(-2, dp(48)))
+        controls.addView(ImageButton(this).apply {
+            setImageResource(R.drawable.ic_voice_backspace)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            imageTintList = ColorStateList.valueOf(accent)
+            contentDescription = getString(R.string.backspace)
+            background = null
+            setOnClickListener {
+                val connection = currentInputConnection
+                if (connection == null || !EditorActions.backspace(connection)) {
+                    showStatus(getString(R.string.delete_failed))
+                }
+            }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
         surface.addView(controls, LinearLayout.LayoutParams(-1, dp(48)))
         render()
         refreshMicrophones()
