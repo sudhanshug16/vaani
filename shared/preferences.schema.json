@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vaani shared preferences v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "language", "mode", "sarvamModel", "processingEnabled", "endpoint", "model", "prompt", "dictionary"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "language": {"enum": ["auto", "en-IN", "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN", "or-IN", "pa-IN", "ta-IN", "te-IN", "gu-IN", "as-IN", "ur-IN", "ne-IN", "kok-IN", "ks-IN", "sd-IN", "sa-IN", "sat-IN", "mni-IN", "brx-IN", "mai-IN", "doi-IN"]},
+    "mode": {"enum": ["translit", "transcribe", "codemix", "translate", "verbatim"]},
+    "sarvamModel": {"enum": ["saaras:v3-realtime", "saaras:v4"]},
+    "processingEnabled": {"type": "boolean"},
+    "endpoint": {"type": "string", "maxLength": 2000, "description": "HTTPS URL, or HTTP localhost; no credentials, query or fragment."},
+    "model": {"type": "string", "maxLength": 200},
+    "prompt": {"type": "string", "maxLength": 16000},
+    "dictionary": {"type": "array", "maxItems": 500, "items": {"type": "string", "minLength": 1, "maxLength": 120}}
+  }
+}

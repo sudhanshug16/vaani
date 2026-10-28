@@ -1,0 +1,10 @@
+.DS_Store
+.build/
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+*.xcuserstate
+.env
+*.keystore

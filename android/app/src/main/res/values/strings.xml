@@ -1,0 +1,20 @@
+<resources>
+    <string name="sync_pairing_unreadable">Pairing unreadable. Pair with Mac again.</string>
+    <string name="polish_enabled">Polish with an OpenAI-compatible API</string>
+    <string name="no_speech_detected">No speech detected.</string>
+    <string name="finishing">Finishing…</string>
+    <string name="insert_failed">Could not insert. Your text stays here.</string>
+    <string name="password_voice_off">Voice is off in password fields.</string>
+    <string name="finish">Finish</string>
+    <string name="connecting">Connecting…</string>
+    <string name="dictate">Dictate</string>
+    <string name="microphone_level">Microphone input level</string>
+    <string name="choose_microphone">Choose microphone</string>
+    <string name="no_microphone">No microphone is available.</string>
+    <string name="preferred_microphone_missing">Your preferred microphone is missing. Choose another input.</string>
+    <string name="ambiguous_microphone">Android cannot distinguish these identical microphones. Disconnect one and choose again.</string>
+    <string name="microphone_saved">Microphone remembered for this setup.</string>
+    <string name="automatic_profile">Automatic · connected hardware</string>
+    <string name="microphone_summary">%1$s · %2$s</string>
+    <string name="delete_failed">Editor could not delete text.</string>
+</resources>

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "language": "auto",
+  "mode": "translit",
+  "sarvamModel": "saaras:v3-realtime",
+  "processingEnabled": false,
+  "endpoint": "https://api.openai.com/v1",
+  "model": "",
+  "prompt": "Clean up dictated text. Preserve meaning and language. Use Romanized Hindi for Hinglish and preserve English words. Return only the cleaned text.",
+  "dictionary": ["Vaani", "Sarvam", "Tailscale"]
+}
