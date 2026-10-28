@@ -188,6 +188,7 @@ final class AudioCapture {
         let source: AVAudioFormat
         let target: AVAudioFormat
         let converter: AVAudioConverter
+        var inputGain = InputGainControl()
         let gate = CaptureGate()
         let onChunk: (Data, Float) -> Void
         let onFailure: (String) -> Void
@@ -221,9 +222,8 @@ final class AudioCapture {
             guard error == nil else { fail("Microphone audio conversion failed. Partial text is preserved."); return }
             guard let samples = output.int16ChannelData?[0], output.frameLength > 0 else { return }
             let length = Int(output.frameLength)
-            var sum: Float = 0
-            for index in 0..<length { let value = Float(samples[index]) / 32768; sum += value * value }
-            gate.deliver { onChunk(Data(bytes: samples, count: length * 2), min(1, sqrt(sum / Float(length)) * 5)) }
+            let rms = inputGain.process(UnsafeMutableBufferPointer(start: samples, count: length))
+            gate.deliver { onChunk(Data(bytes: samples, count: length * 2), min(1, rms * 5)) }
         }
     }
 }

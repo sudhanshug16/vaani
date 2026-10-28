@@ -614,3 +614,20 @@ the normal app remained running. The test launchd job was removed afterward.
 Direct SSH launch had different TCC attribution and was not treated as a valid
 app microphone approval check. Shortcut-tap registration remains a separate
 permission/acceptance item for this rebuilt app.
+
+### Mac automatic input gain (2026-10-29)
+
+Added a per-recording streaming gain controller after conversion to mono 16 kHz
+PCM16, before both speech upload and the level meter. It targets -22 dBFS RMS,
+caps boost at 4x (about +12 dB), returns toward unity below -50 dBFS, and limits
+peaks to 95% full scale. Gain changes are smoothed, with fast attenuation and
+slower recovery/boost. State belongs to the serial capture session and resets
+with each recording. Device gain, routing and system volume are unchanged.
+This is local gain control, not WebRTC, noise removal or recovery of already
+clipped/inaudible speech. Background noise above the threshold can also be boosted.
+
+All 106 Swift tests passed, including five new signal tests for quiet speech,
+loud speech, silence/subthreshold signal, a sudden full-scale transient after
+boost, and output independence from callback chunk boundaries. These synthetic
+tests establish DSP behavior; real speech recognition improvement and perceived
+quality on the Air remain unverified.
