@@ -5,6 +5,10 @@ import VaaniCore
 
 @main struct VaaniApp: App {
     init() {
+        if CommandLine.arguments.contains("--capture-lifecycle-smoke") {
+            do { try CaptureLifecycleSmoke.run(); exit(0) }
+            catch { print("Capture lifecycle failed: \(error.localizedDescription)"); exit(1) }
+        }
         if CommandLine.arguments.contains("--diagnose") {
             let microphones = DeviceInventory.microphones()
             print("Inputs: \(microphones.count)")

@@ -569,3 +569,20 @@ fixtures passed Responses success, null output, HTTP error, redirect rejection,
 raw recovery, mic release before polishing, restart and cancellation/socket abort.
 These fixtures use dummy keys. No live provider cache-hit, tier entitlement,
 price or latency claim is made.
+
+### Air capture crash investigation (2026-10-28)
+
+The two latest Air crash reports faulted in an AVAudioIOUnit property-listener
+callback. One report showed AVAudioEngine deallocation from AudioCapture.start
+on the main thread at the same time. Capture now retains and reuses one engine
+across starts, stops and startup failures, while removing its tap/observer and
+closing the PCM gate on stop. Tap installation is tracked so failed startup
+does not remove a nonexistent tap. This addresses the observed teardown path;
+hardware acceptance remains required before claiming the crash is resolved.
+
+101 Swift tests and the signed release build passed. Added the explicit
+`--capture-lifecycle-smoke` headless check: ten short built-in microphone starts
+and stops, checking routing and PCM delivery without saving/sending audio or
+requesting OS permission. The installed Air build's first attempt stopped with
+microphone permission unavailable, so no capture cycles ran. The user must
+renew the OS approval before hardware verification can continue.

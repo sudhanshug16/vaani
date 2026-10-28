@@ -89,13 +89,18 @@ enum DeviceInventory {
 
 // The selected input is changed only on this engine's AudioUnit, never system-wide.
 final class AudioCapture {
+    // Keep the IO unit alive across dictations, including failed starts. On
+    // macOS 27 its asynchronous property listeners can outlive engine teardown.
     private var engine: AVAudioEngine?
+    private var tapInstalled = false
     private var configurationObserver: NSObjectProtocol?
     private var gate: CaptureGate?
     func start(deviceID: AudioDeviceID, onChunk: @escaping (Data, Float) -> Void,
                onFailure: @escaping (String) -> Void) throws {
         stop()
-        let engine = AVAudioEngine(); let input = engine.inputNode
+        let engine = self.engine ?? AVAudioEngine()
+        self.engine = engine
+        let input = engine.inputNode
         guard let unit = input.audioUnit else { throw VaaniError.message("Audio input is unavailable.") }
         var id = deviceID
         let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
@@ -127,9 +132,10 @@ final class AudioCapture {
             for index in 0..<length { let value = Float(samples[index]) / 32768; sum += value * value }
             gate.deliver { onChunk(Data(bytes: samples, count: length * 2), min(1, sqrt(sum / Float(length)) * 5)) }
         }
+        tapInstalled = true
         engine.prepare()
         do {
-            try engine.start(); self.engine = engine
+            try engine.start()
             guard isUsing(deviceID: deviceID) else { throw VaaniError.message("The selected microphone could not be confirmed.") }
             configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
                 object: engine, queue: nil) { _ in
@@ -148,10 +154,8 @@ final class AudioCapture {
                 }
             guard gate.open() else { throw VaaniError.message("Audio configuration changed while starting. Try recording again.") }
         } catch {
-            gate.close()
-            if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
-            configurationObserver = nil
-            input.removeTap(onBus: 0); engine.stop(); self.engine = nil; self.gate = nil; throw error
+            stop()
+            throw error
         }
     }
     func isUsing(deviceID: AudioDeviceID) -> Bool {
@@ -163,7 +167,8 @@ final class AudioCapture {
         gate?.close(); gate = nil
         if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
         configurationObserver = nil
-        engine?.inputNode.removeTap(onBus: 0); engine?.stop(); engine = nil
+        if tapInstalled { engine?.inputNode.removeTap(onBus: 0); tapInstalled = false }
+        engine?.stop()
     }
     deinit { stop() }
 }
