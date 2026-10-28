@@ -88,8 +88,8 @@ class DeviceSmokeRunner : Instrumentation() {
         val client = okhttp3.OkHttpClient.Builder().callTimeout(5, TimeUnit.SECONDS).build()
         try {
             for ((status, body, expected) in listOf(
-                Triple(200, "{\"choices\":[{\"message\":{\"content\":\"Kal Sarvam aur Vaani ka demo hai.\"}}]}", "Kal Sarvam aur Vaani ka demo hai."),
-                Triple(200, "{\"choices\":[{\"message\":{\"content\":null}}]}", null),
+                Triple(200, "{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Kal Sarvam aur Vaani ka demo hai.\"}]}]}", "Kal Sarvam aur Vaani ka demo hai."),
+                Triple(200, "{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":null}]}]}", null),
                 Triple(429, "{}", null), Triple(302, "{}", null))) {
                 java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
                     server.soTimeout = 5000
@@ -97,7 +97,7 @@ class DeviceSmokeRunner : Instrumentation() {
                         server.accept().use { socket ->
                             socket.soTimeout = 5000
                             val input = socket.getInputStream().bufferedReader()
-                            check(input.readLine() == "POST /v1/chat/completions HTTP/1.1") { "Completion path mismatch" }
+                            check(input.readLine() == "POST /v1/responses HTTP/1.1") { "Completion path mismatch" }
                             val headers = mutableMapOf<String, String>()
                             while (true) {
                                 val line = input.readLine()
@@ -109,7 +109,7 @@ class DeviceSmokeRunner : Instrumentation() {
                             var offset = 0
                             while (offset < chars.size) { val count = input.read(chars, offset, chars.size - offset); check(count > 0); offset += count }
                             val request = org.json.JSONObject(String(chars))
-                            check(request.getJSONArray("messages").getJSONObject(1).getString("content") == "kal sarvam aur vani ka demo hai") { "Transcript payload mismatch" }
+                            check(request.getJSONArray("input").getJSONObject(1).getString("content") == "kal sarvam aur vani ka demo hai") { "Transcript payload mismatch" }
                             val bytes = body.toByteArray()
                             socket.getOutputStream().apply {
                                 write("HTTP/1.1 $status Fixture\r\nContent-Length: ${bytes.size}\r\nLocation: http://127.0.0.1:1/leak\r\nConnection: close\r\n\r\n".toByteArray())

@@ -8,9 +8,38 @@ public struct SharedPreferences: Codable, Equatable {
     public var processingEnabled = false
     public var endpoint = "https://api.openai.com/v1"
     public var model = ""
+    public var serviceTier = ""
     public var prompt = Self.defaultPrompt
     public var dictionary: [String] = []
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, language, mode, sarvamModel, processingEnabled, endpoint, model, serviceTier, prompt, dictionary
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        language = try values.decode(String.self, forKey: .language)
+        mode = try values.decode(String.self, forKey: .mode)
+        sarvamModel = try values.decode(String.self, forKey: .sarvamModel)
+        processingEnabled = try values.decode(Bool.self, forKey: .processingEnabled)
+        endpoint = try values.decode(String.self, forKey: .endpoint)
+        model = try values.decode(String.self, forKey: .model)
+        serviceTier = values.contains(.serviceTier) ? try values.decode(String.self, forKey: .serviceTier) : ""
+        prompt = try values.decode(String.self, forKey: .prompt)
+        dictionary = try values.decode([String].self, forKey: .dictionary)
+    }
+
+    public static let serviceTiers = ["", "auto", "default", "priority", "flex"]
+    public static func serviceTierName(_ tier: String) -> String {
+        switch tier {
+        case "auto": "Auto"
+        case "default": "Standard"
+        case "priority": "Fast / Priority"
+        case "flex": "Flex"
+        default: "Provider default"
+        }
+    }
 
     public static let defaultPrompt = """
     Clean up this dictated text. Fix punctuation and remove accidental repetitions.
@@ -22,6 +51,7 @@ public struct SharedPreferences: Codable, Equatable {
 
     public func validated() throws -> Self {
         guard schemaVersion == 1 else { throw VaaniError.message("Unsupported settings version.") }
+        guard Self.serviceTiers.contains(serviceTier) else { throw VaaniError.message("Unsupported service tier.") }
         guard Self.languages.contains(language), Self.modes.contains(mode),
               ["saaras:v3-realtime", "saaras:v4"].contains(sarvamModel) else {
             throw VaaniError.message("Unsupported speech configuration.")
@@ -31,7 +61,7 @@ public struct SharedPreferences: Codable, Equatable {
               endpoint.unicodeScalars.count <= 2000, model.unicodeScalars.count <= 200 else {
             throw VaaniError.message("Settings exceed size limits.")
         }
-        _ = try Self.completionsURL(endpoint)
+        _ = try Self.responsesURL(endpoint)
         return self
     }
 
@@ -46,7 +76,7 @@ public struct SharedPreferences: Codable, Equatable {
         "sat-IN": "Santali", "mni-IN": "Manipuri", "brx-IN": "Bodo", "mai-IN": "Maithili", "doi-IN": "Dogri"]
     public static func languageName(_ code: String) -> String { languageNames[code] ?? code }
 
-    public static func completionsURL(_ base: String) throws -> URL {
+    public static func responsesURL(_ base: String) throws -> URL {
         guard var parts = URLComponents(string: base.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = parts.scheme, let host = parts.host, !host.isEmpty,
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
@@ -55,7 +85,8 @@ public struct SharedPreferences: Codable, Equatable {
         }
         var path = parts.path
         while path.hasSuffix("/") { path.removeLast() }
-        if !path.hasSuffix("/chat/completions") { path += "/chat/completions" }
+        if path.hasSuffix("/chat/completions") { path.removeLast("/chat/completions".count) }
+        if !path.hasSuffix("/responses") { path += "/responses" }
         parts.path = path
         guard let url = parts.url else { throw VaaniError.message("Invalid API URL.") }
         return url

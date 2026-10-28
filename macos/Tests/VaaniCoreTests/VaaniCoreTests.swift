@@ -40,10 +40,10 @@ final class VaaniCoreTests: XCTestCase {
         XCTAssertEqual(transcript.finalText, "first second")
     }
     func testPostProcessingURLValidation() throws {
-        XCTAssertEqual(try SharedPreferences.completionsURL("https://example.com/v1/").absoluteString, "https://example.com/v1/chat/completions")
-        XCTAssertEqual(try SharedPreferences.completionsURL("http://localhost:1234/v1/chat/completions").path, "/v1/chat/completions")
+        XCTAssertEqual(try SharedPreferences.responsesURL("https://example.com/v1/").absoluteString, "https://example.com/v1/responses")
+        XCTAssertEqual(try SharedPreferences.responsesURL("http://localhost:1234/v1/responses").path, "/v1/responses")
         for invalid in ["http://remote.test/v1", "https://user:secret@example.com", "file:///tmp/x", "https://example.com?token=abc"] {
-            XCTAssertThrowsError(try SharedPreferences.completionsURL(invalid))
+            XCTAssertThrowsError(try SharedPreferences.responsesURL(invalid))
         }
     }
     func testSharedExportHasNoCredentialsOrDeviceIdentity() throws {

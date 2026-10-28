@@ -550,3 +550,22 @@ Landscape, gesture navigation, large fonts and manual TalkBack remain unverified
 The device screenshot connector failed; agent-device screenshots and snapshots
 provided native UI verification. Screenshot artifacts are local build/test
 artifacts and are not committed.
+
+### Responses API, service tiers and caching (2026-10-28)
+
+Mac and Android Polish settings now persist/share a service tier, defaulting to
+omitting the parameter. Legacy settings without the field remain readable;
+unsupported values and invalid types are rejected. Requests use only Responses,
+including normalization of old full Chat Completions URLs. Stable developer
+prompt/dictionary input precedes each independent transcript, with a stable
+prefix-derived cache key (at most 64 characters) and `store: false`.
+
+99 Swift tests and 48 Android JVM tests passed, including request payloads,
+all service tiers, cache-key stability across transcripts and tier changes,
+cache-key changes when the prompt changes, legacy imports, multi-block output,
+incomplete/refused output rejection and existing failure/cancellation coverage.
+Android app/test APK builds and lint passed. Physical Android 13 local HTTP
+fixtures passed Responses success, null output, HTTP error, redirect rejection,
+raw recovery, mic release before polishing, restart and cancellation/socket abort.
+These fixtures use dummy keys. No live provider cache-hit, tier entitlement,
+price or latency claim is made.

@@ -3,6 +3,20 @@ import XCTest
 @testable import VaaniCore
 
 final class SharedSettingsFileTests: XCTestCase {
+    func testLegacySettingsAndServiceTierRoundTrip() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: SharedSettingsFile.encode(SharedPreferences())) as? [String: Any])
+        object.removeValue(forKey: "serviceTier")
+        XCTAssertEqual(try SharedSettingsFile.decode(JSONSerialization.data(withJSONObject: object)).serviceTier, "")
+        for tier in SharedPreferences.serviceTiers {
+            var preferences = SharedPreferences(); preferences.serviceTier = tier
+            XCTAssertEqual(try SharedSettingsFile.decode(SharedSettingsFile.encode(preferences)), preferences)
+        }
+        for invalid: Any in ["unknown", 42, NSNull()] {
+            object["serviceTier"] = invalid
+            XCTAssertThrowsError(try SharedSettingsFile.decode(JSONSerialization.data(withJSONObject: object)))
+        }
+        XCTAssertEqual(try SharedPreferences.responsesURL("https://example.com/v1/chat/completions/").path, "/v1/responses")
+    }
     func testUnicodeRoundTripDropsUnknownFields() throws {
         var preferences = SharedPreferences()
         preferences.prompt = "Keep café, नमस्ते and 👨‍👩‍👧‍👦."

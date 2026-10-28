@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 private final class ProcessingNoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -14,13 +15,19 @@ public enum PostProcessor {
         guard !preferences.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VaaniError.message("Set a post-processing model first.") }
         _ = try preferences.validated()
         try Task.checkCancellation()
-        var request = URLRequest(url: try SharedPreferences.completionsURL(preferences.endpoint))
+        var request = URLRequest(url: try SharedPreferences.responsesURL(preferences.endpoint))
         request.httpMethod = "POST"; request.timeoutInterval = 45
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": preferences.model,
-            "messages": [["role": "system", "content": preferences.prompt + "\nDictionary: " + preferences.dictionary.joined(separator: ", ")],
-                         ["role": "user", "content": text]], "stream": false])
+        let instructions = preferences.prompt + "\nDictionary: " + preferences.dictionary.joined(separator: ", ")
+        // Stable developer prefix before the changing transcript. No transcript
+        // or per-request identifier enters the cache routing key.
+        let digest = SHA256.hash(data: Data(instructions.utf8)).map { String(format: "%02x", $0) }.joined()
+        var body: [String: Any] = ["model": preferences.model,
+            "input": [["role": "developer", "content": instructions], ["role": "user", "content": text]],
+            "prompt_cache_key": "vaani-polish-v1-" + digest.prefix(48), "store": false, "stream": false]
+        if !preferences.serviceTier.isEmpty { body["service_tier"] = preferences.serviceTier }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let session = URLSession(configuration: configuration, delegate: ProcessingNoRedirect(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
@@ -28,9 +35,29 @@ public enum PostProcessor {
             throw VaaniError.message("Post-processing failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)). Raw text is preserved.")
         }
         guard data.count <= 256_000 else { throw VaaniError.message("The processing response is too large. Raw text is preserved.") }
-        struct Completion: Decodable { struct Choice: Decodable { struct Message: Decodable { let content: String? }; let message: Message }; let choices: [Choice] }
-        guard let output = try JSONDecoder().decode(Completion.self, from: data).choices.first?.message.content,
-              !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VaaniError.message("The model returned no text. Raw text is preserved.") }
-        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        struct Response: Decodable {
+            struct Item: Decodable {
+                struct Content: Decodable { let type: String; let text: String? }
+                let type: String; let role: String?; let status: String?; let content: [Content]?
+            }
+            let status: String; let output: [Item]
+        }
+        let responseBody = try JSONDecoder().decode(Response.self, from: data)
+        guard responseBody.status == "completed" else { throw VaaniError.message("Polishing did not complete. Raw text is preserved.") }
+        var parts: [String] = []
+        for item in responseBody.output where item.type != "reasoning" {
+            guard item.type == "message", item.role == "assistant", item.status == "completed", let content = item.content else {
+                throw VaaniError.message("Unexpected polishing output. Raw text is preserved.")
+            }
+            for block in content {
+                guard block.type == "output_text", let text = block.text else {
+                    throw VaaniError.message("The model returned no text or refused polishing. Raw text is preserved.")
+                }
+                parts.append(text)
+            }
+        }
+        let output = parts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !output.isEmpty else { throw VaaniError.message("The model returned no text. Raw text is preserved.") }
+        return output
     }
 }

@@ -43,20 +43,53 @@ class PostProcessorTest {
     private var action: (JSONObject) -> Unit = {}
     @Test fun requestPreservesHinglishPromptDictionaryAndAuth() {
         action = { assertEquals("Kal Sarvam aur Vaani ka demo hai.", PostProcessor.process("kal sarvam aur vani ka demo hai", it, "fixture-key", OkHttpClient())) }
-        reply(body = """{"choices":[{"message":{"content":"  Kal Sarvam aur Vaani ka demo hai.  "}}]}""") { path, headers, body ->
-            assertEquals("POST /v1/chat/completions HTTP/1.1", path)
+        reply(body = """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"  Kal Sarvam aur Vaani ka demo hai.  "}]}]}""") { path, headers, body ->
+            assertEquals("POST /v1/responses HTTP/1.1", path)
             assertEquals("Bearer fixture-key", headers["authorization"])
             val request = JSONObject(body)
             assertEquals("fixture-model", request.getString("model")); assertFalse(request.getBoolean("stream"))
-            val messages = request.getJSONArray("messages")
+            val messages = request.getJSONArray("input")
             assertEquals("Preserve Hinglish.\nDictionary: Sarvam, Vaani", messages.getJSONObject(0).getString("content"))
             assertEquals("kal sarvam aur vani ka demo hai", messages.getJSONObject(1).getString("content"))
+        }
+    }
+    @Test fun tiersAndStableCachePrefixAcrossTranscripts() {
+        val keys = mutableSetOf<String>()
+        for (tier in Preferences.serviceTiers) {
+            action = { prefs ->
+                prefs.put("serviceTier", tier)
+                assertEquals("Kal office.", PostProcessor.process("different transcript $tier", prefs, "", OkHttpClient()))
+            }
+            reply(body = """{"status":"completed","output":[{"type":"reasoning"},{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Kal "},{"type":"output_text","text":"office."}]}]}""") { _, _, body ->
+                val request = JSONObject(body)
+                if (tier.isEmpty()) assertFalse(request.has("service_tier")) else assertEquals(tier, request.getString("service_tier"))
+                assertFalse(request.getBoolean("store")); assertFalse(request.has("messages"))
+                assertEquals("developer", request.getJSONArray("input").getJSONObject(0).getString("role"))
+                keys.add(request.getString("prompt_cache_key"))
+            }
+        }
+        assertEquals(1, keys.size)
+        assertTrue(keys.first().length <= 64)
+        action = { prefs ->
+            prefs.put("prompt", "Changed prompt")
+            PostProcessor.process("raw", prefs, "", OkHttpClient())
+        }
+        reply(body = """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Done."}]}]}""") { _, _, body ->
+            assertFalse(keys.contains(JSONObject(body).getString("prompt_cache_key")))
+        }
+    }
+    @Test fun incompleteAndRefusalAreRejectedEvenWithText() {
+        for (body in listOf(
+            """{"status":"incomplete","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"partial"}]}]}""",
+            """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"partial"},{"type":"refusal","refusal":"no"}]}]}""")) {
+            action = { prefs -> assertThrows(Exception::class.java) { PostProcessor.process("raw", prefs, "", OkHttpClient()) } }
+            reply(body = body)
         }
     }
     @Test fun nullBlankAndNonTextContentAreRejected() {
         for (content in listOf("null", "\" \"", "42", "[]")) {
             action = { prefs -> assertThrows(Exception::class.java) { PostProcessor.process("raw", prefs, "", OkHttpClient()) } }
-            reply(body = """{"choices":[{"message":{"content":$content}}]}""")
+            reply(body = """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":$content}]}]}""")
         }
     }
     @Test fun httpErrorsRedirectsAndMalformedBodiesFail() {

@@ -511,13 +511,19 @@ struct SettingsView: View {
     }
     private var polishPage: some View {
         VStack(alignment: .leading, spacing: 20) {
-            card("OpenAI-compatible API") {
+            card("Responses API") {
                 Toggle("Polish after transcription", isOn: $store.shared.processingEnabled)
                 TextField("API base URL", text: $store.shared.endpoint).textFieldStyle(.roundedBorder)
                 TextField("Model name", text: $store.shared.model).textFieldStyle(.roundedBorder)
+                Picker("Service tier", selection: $store.shared.serviceTier) {
+                    ForEach(SharedPreferences.serviceTiers, id: \.self) { tier in
+                        Text(SharedPreferences.serviceTierName(tier)).tag(tier)
+                    }
+                }
+                Text("Provider default leaves the tier unspecified. Fast / Priority may cost more; tier availability depends on your provider and model.").font(.caption).foregroundStyle(.secondary)
                 SecureField("API key (optional for local servers)", text: $processingKey).textFieldStyle(.roundedBorder)
                 HStack { Button("Save key") { saveKey(processingKey, account: "processing") }; Text(keyNotice).font(.caption).foregroundStyle(.secondary) }
-                Text("Accepts /v1 base URLs and full /chat/completions URLs. HTTPS required except on localhost. Only text is sent to this provider.").font(.caption).foregroundStyle(.secondary)
+                Text("Accepts /v1 base URLs and full /responses URLs. HTTPS required except on localhost. Only text is sent to this provider.").font(.caption).foregroundStyle(.secondary)
             }
             card("Your prompt") {
                 TextEditor(text: $store.shared.prompt).font(.system(size: 12, design: .monospaced)).frame(minHeight: 170).scrollContentBackground(.hidden)

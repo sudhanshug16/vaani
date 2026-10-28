@@ -6,6 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PreferencesTest {
+    @Test fun legacySettingsAndServiceTierRoundTrip() {
+        val legacy = Preferences.defaults().apply { remove("serviceTier") }
+        assertEquals("", Preferences.canonical(legacy).getString("serviceTier"))
+        for (tier in Preferences.serviceTiers) {
+            assertEquals(tier, Preferences.canonical(Preferences.defaults().put("serviceTier", tier)).getString("serviceTier"))
+        }
+        for (invalid in listOf("unknown", 42, JSONObject.NULL)) {
+            assertThrows(IllegalArgumentException::class.java) { Preferences.canonical(Preferences.defaults().put("serviceTier", invalid)) }
+        }
+        assertEquals("https://example.com/v1/responses", Preferences.responsesUrl("https://example.com/v1/chat/completions/"))
+    }
     @Test fun importedUnknownFieldsCannotLeakIntoAnExport() {
         val imported = Preferences.defaults().put("sarvamKey", "do-not-export").put("setups", JSONObject().put("mic", "private"))
         val exported = Preferences.canonical(imported)
@@ -19,10 +30,10 @@ class PreferencesTest {
     }
     @Test fun validatesRemoteEndpointBeforeAKeyCanBeSent() {
         listOf("http://remote.example/v1", "https://user:secret@example.com/v1", "file:///tmp/data", "https://example.com?token=test").forEach { url ->
-            assertThrows(IllegalArgumentException::class.java) { Preferences.completionUrl(url) }
+            assertThrows(IllegalArgumentException::class.java) { Preferences.responsesUrl(url) }
         }
-        assertEquals("http://localhost:1234/v1/chat/completions", Preferences.completionUrl("http://localhost:1234/v1/"))
-        assertEquals("https://example.com/v1/chat/completions", Preferences.completionUrl("https://example.com/v1/chat/completions"))
+        assertEquals("http://localhost:1234/v1/responses", Preferences.responsesUrl("http://localhost:1234/v1/"))
+        assertEquals("https://example.com/v1/responses", Preferences.responsesUrl("https://example.com/v1/responses"))
     }
     @Test fun rejectsOversizedAndNonStringDictionary() {
         assertThrows(IllegalArgumentException::class.java) { Preferences.validate(Preferences.defaults().put("dictionary", JSONArray().put(42))) }

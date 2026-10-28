@@ -34,19 +34,19 @@ internal object PolishingLifecycleSmoke {
                             header.append(byte.toChar())
                         }
                         val lines = header.toString().split("\r\n")
-                        check(lines.first() == "POST /v1/chat/completions HTTP/1.1") { "Wrong completion destination" }
+                        check(lines.first() == "POST /v1/responses HTTP/1.1") { "Wrong completion destination" }
                         val headers = lines.drop(1).filter { it.contains(':') }.associate { it.substringBefore(':').lowercase() to it.substringAfter(':').trim() }
                         check(headers["authorization"] == "Bearer fixture-processing-key") { "Wrong fixture credential" }
                         val body = ByteArray(headers.getValue("content-length").toInt())
                         var offset = 0
                         while (offset < body.size) { val n = stream.read(body, offset, body.size - offset); check(n > 0); offset += n }
-                        check(JSONObject(String(body, Charsets.UTF_8)).getJSONArray("messages").getJSONObject(1).getString("content") == "Kal office mein demo hai.") { "Wrong raw transcript" }
+                        check(JSONObject(String(body, Charsets.UTF_8)).getJSONArray("input").getJSONObject(1).getString("content") == "Kal office mein demo hai.") { "Wrong raw transcript" }
                         requestReceived.countDown()
                         check(respond.await(8, TimeUnit.SECONDS)) { "Response was not released" }
                         if (scenario == "cancel") check(stream.read() == -1) { "Cancel did not abort HTTP socket" }
                         else {
                             val status = if (scenario == "success") 200 else 429
-                            val response = if (scenario == "success") """{"choices":[{"message":{"content":"Kal office mein Vaani ka demo hai."}}]}""" else "{}"
+                            val response = if (scenario == "success") """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Kal office mein Vaani ka demo hai."}]}]}""" else "{}"
                             val bytes = response.toByteArray()
                             socket.getOutputStream().apply {
                                 write("HTTP/1.1 $status Fixture\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())

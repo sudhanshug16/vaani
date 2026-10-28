@@ -39,36 +39,70 @@ final class PostProcessorTests: XCTestCase {
         return prefs
     }
     override func tearDown() { CompletionFixture.respond = nil; super.tearDown() }
+    private static func requestJSON(_ request: URLRequest) throws -> [String: Any] {
+        var body = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&bytes, maxLength: bytes.count)
+                if count <= 0 { break }; body.append(contentsOf: bytes.prefix(count))
+            }
+        }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    }
+    func testTiersAndStableCachePrefixAcrossDifferentTranscripts() async throws {
+        var keys: [String] = []
+        for tier in SharedPreferences.serviceTiers {
+            var prefs = preferences; prefs.serviceTier = tier
+            CompletionFixture.respond = { request in
+                let json = try Self.requestJSON(request)
+                XCTAssertEqual(json["service_tier"] as? String, tier.isEmpty ? nil : tier)
+                XCTAssertEqual(json["store"] as? Bool, false)
+                XCTAssertNil(json["messages"])
+                let input = try XCTUnwrap(json["input"] as? [[String: String]])
+                XCTAssertEqual(input[0]["role"], "developer")
+                XCTAssertEqual(input[0]["content"], "Preserve Hinglish.\nDictionary: Sarvam, Vaani")
+                keys.append(try XCTUnwrap(json["prompt_cache_key"] as? String))
+                return (200, Data(#"{"status":"completed","output":[{"type":"reasoning"},{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Kal "},{"type":"output_text","text":"office."}]}]}"#.utf8))
+            }
+            let text = try await PostProcessor.process("different transcript \(tier)", preferences: prefs, key: "", configuration: configuration)
+            XCTAssertEqual(text, "Kal office.")
+        }
+        XCTAssertEqual(Set(keys).count, 1)
+        XCTAssertLessThanOrEqual(keys[0].count, 64)
+        let previousKey = keys[0]
+        var changed = preferences; changed.prompt += " Changed."
+        CompletionFixture.respond = { request in
+            let json = try Self.requestJSON(request)
+            XCTAssertNotEqual(json["prompt_cache_key"] as? String, previousKey)
+            return (200, Data(#"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Done."}]}]}"#.utf8))
+        }
+        _ = try await PostProcessor.process("raw", preferences: changed, key: "", configuration: configuration)
+    }
     func testRequestPreservesPromptDictionaryAndAuth() async throws {
         CompletionFixture.respond = { request in
-            XCTAssertEqual(request.url?.path, "/v1/chat/completions")
+            XCTAssertEqual(request.url?.path, "/v1/responses")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-key")
-            var body = request.httpBody ?? Data()
-            if let stream = request.httpBodyStream {
-                stream.open(); defer { stream.close() }
-                var bytes = [UInt8](repeating: 0, count: 4096)
-                while stream.hasBytesAvailable {
-                    let count = stream.read(&bytes, maxLength: bytes.count)
-                    if count <= 0 { break }; body.append(contentsOf: bytes.prefix(count))
-                }
-            }
-            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let json = try Self.requestJSON(request)
             XCTAssertEqual(json["model"] as? String, "fixture-model")
             XCTAssertEqual(json["stream"] as? Bool, false)
-            let messages = try XCTUnwrap(json["messages"] as? [[String: String]])
+            let messages = try XCTUnwrap(json["input"] as? [[String: String]])
             XCTAssertEqual(messages[0]["content"], "Preserve Hinglish.\nDictionary: Sarvam, Vaani")
             XCTAssertEqual(messages[1]["content"], "kal sarvam aur vani ka demo hai")
-            return (200, Data(#"{"choices":[{"message":{"content":"  Kal Sarvam aur Vaani ka demo hai.  "}}]}"#.utf8))
+            return (200, Data(#"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"  Kal Sarvam aur Vaani ka demo hai.  "}]}]}"#.utf8))
         }
         let output = try await PostProcessor.process("kal sarvam aur vani ka demo hai", preferences: preferences, key: "fixture-key", configuration: configuration)
         XCTAssertEqual(output, "Kal Sarvam aur Vaani ka demo hai.")
     }
     func testInvalidContentAndProviderErrorsNeverProduceOutput() async {
-        let fixtures = [(200, #"{"choices":[{"message":{"content":null}}]}"#),
-                        (200, #"{"choices":[{"message":{"content":42}}]}"#),
-                        (200, #"{"choices":[{"message":{"content":"  "}}]}"#),
-                        (200, #"{"choices":[]}"#), (200, "invalid"), (429, "private provider error"), (302, "")]
+        let fixtures = [(200, #"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":null}]}]}"#),
+                        (200, #"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":42}]}]}"#),
+                        (200, #"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"  "}]}]}"#),
+                        (200, #"{"status":"completed","output":[]}"#),
+                        (200, #"{"status":"incomplete","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"partial"}]}]}"#),
+                        (200, #"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"no"}]}]}"#), (200, "invalid"), (429, "private provider error"), (302, "")]
         for (status, body) in fixtures {
             CompletionFixture.respond = { _ in (status, Data(body.utf8)) }
             do {

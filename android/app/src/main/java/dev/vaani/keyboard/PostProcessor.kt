@@ -7,8 +7,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
-/** One completion request; callers retain raw text until this succeeds. */
+/** One Responses request; callers retain raw text until this succeeds. */
 object PostProcessor {
     fun process(text: String, settings: JSONObject, key: String, client: OkHttpClient,
                 onCall: (Call) -> Unit = {}): String {
@@ -16,11 +17,17 @@ object PostProcessor {
         Preferences.validate(settings)
         check(settings.getString("model").isNotBlank()) { "Set a processing model" }
         val dictionary = settings.getJSONArray("dictionary")
-        val body = JSONObject().put("model", settings.getString("model")).put("stream", false)
-            .put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", settings.getString("prompt") + "\nDictionary: " +
-                (0 until dictionary.length()).joinToString(", ") { dictionary.getString(it) }))
+        val instructions = settings.getString("prompt") + "\nDictionary: " +
+            (0 until dictionary.length()).joinToString(", ") { dictionary.getString(it) }
+        val digest = MessageDigest.getInstance("SHA-256").digest(instructions.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val body = JSONObject().put("model", settings.getString("model")).put("stream", false).put("store", false)
+            .put("prompt_cache_key", "vaani-polish-v1-${digest.take(48)}")
+            .put("input", JSONArray().put(JSONObject().put("role", "developer").put("content", instructions))
                 .put(JSONObject().put("role", "user").put("content", text)))
-        val request = Request.Builder().url(Preferences.completionUrl(settings.getString("endpoint")))
+        val tier = settings.optString("serviceTier", "")
+        if (tier.isNotEmpty()) body.put("service_tier", tier)
+        val request = Request.Builder().url(Preferences.responsesUrl(settings.getString("endpoint")))
             .post(body.toString().toRequestBody("application/json".toMediaType()))
         if (key.isNotBlank()) request.header("Authorization", "Bearer $key")
         // Keep this boundary safe even if another caller supplies a redirecting client.
@@ -33,10 +40,24 @@ object PostProcessor {
             source.request(256_001)
             check(source.buffer.size <= 256_000) { "Processing response is too large" }
             val bytes = source.readByteArray()
-            val message = JSONObject(String(bytes, Charsets.UTF_8)).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
-            val content = message.opt("content")
-            check(content is String && content.isNotBlank()) { "Model returned no text" }
-            return content.trim()
+            val result = JSONObject(String(bytes, Charsets.UTF_8))
+            check(result.getString("status") == "completed") { "Polishing did not complete. Raw text is preserved." }
+            val output = result.getJSONArray("output")
+            val parts = mutableListOf<String>()
+            for (index in 0 until output.length()) {
+                val item = output.getJSONObject(index)
+                if (item.getString("type") == "reasoning") continue
+                check(item.getString("type") == "message" && item.getString("role") == "assistant" && item.getString("status") == "completed") { "Unexpected polishing output" }
+                val content = item.getJSONArray("content")
+                for (blockIndex in 0 until content.length()) {
+                    val block = content.getJSONObject(blockIndex)
+                    check(block.getString("type") == "output_text" && block.opt("text") is String) { "Model returned no text" }
+                    parts.add(block.getString("text"))
+                }
+            }
+            val textOutput = parts.joinToString("").trim()
+            check(textOutput.isNotBlank()) { "Model returned no text" }
+            return textOutput
         }
     }
 }
