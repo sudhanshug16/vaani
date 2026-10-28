@@ -37,7 +37,7 @@ import VaaniCore
     private let shortcut = Shortcut()
     private var shortcutRetry: Timer?
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         let arguments = CommandLine.arguments
         model.showPanel = { [weak self] in self?.presentPanel() }
         model.showErrorDetails = { [weak self] in self?.presentSettings() }
@@ -192,8 +192,7 @@ import VaaniCore
                 self.registerShortcut()
             }
         }
-        do { if try Vault.read("sarvam").isEmpty { presentSettings() } }
-        catch { model.error = error.localizedDescription; presentSettings() }
+        presentSettings()
     }
     private func registerShortcut() {
         if shortcut.register(model.store.shortcut) {
@@ -205,6 +204,10 @@ import VaaniCore
     func applicationWillTerminate(_ notification: Notification) {
         shortcutRetry?.invalidate(); shortcut.unregister()
     }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        presentSettings()
+        return false
+    }
     func presentSettings() {
         if settings == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 670),
@@ -214,7 +217,9 @@ import VaaniCore
             window.contentView = NSHostingView(rootView: SettingsView(model: model, store: model.store, sync: model.settingsSync))
             window.center(); settings = window
         }
-        NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if settings?.isMiniaturized == true { settings?.deminiaturize(nil) }
+        settings?.makeKeyAndOrderFront(nil)
     }
     func presentPanel() {
         if panel == nil {

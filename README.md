@@ -15,7 +15,7 @@ Requires macOS 14+, Xcode command-line tools and Swift 5.10+.
 swift test --package-path macos
 ```
 
-Launch `build/Vaani.app` from Finder. The app lives in the menu bar. On first launch:
+Launch `build/Vaani.app` from Finder. Vaani appears in the Dock and menu bar, and opens Settings on launch. Click its Dock icon to restore Settings after closing or minimizing the window. Closing Settings leaves dictation running; use Quit Vaani to exit. On first launch:
 
 1. Add your Sarvam API key in **Voice**; it is stored in macOS Keychain.
 2. Open **Microphones**, select an input and remember it for the current setup. You can name it Home, Office, etc.
