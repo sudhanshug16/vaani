@@ -586,3 +586,31 @@ and stops, checking routing and PCM delivery without saving/sending audio or
 requesting OS permission. The installed Air build's first attempt stopped with
 microphone permission unavailable, so no capture cycles ran. The user must
 renew the OS approval before hardware verification can continue.
+
+### Follow-up Air crash and hardware acceptance (2026-10-28)
+
+The next user-supplied report faulted in the main-thread shortcut event-tap
+callback's MainActor.assumeIsolated executor check. The adapter now confines its
+synchronous state to the main run loop, checks Thread.isMainThread, and queues
+actions onto DispatchQueue.main outside the C callback.
+
+Running the previous engine-based hardware fixture in the logged-in launchd
+session exposed additional failures: its AudioUnit route could not be confirmed,
+and a subsequent process hit an uncaught tap-format-mismatch exception. Retaining
+the engine alone was insufficient. Replaced AVAudioEngine capture with an
+AudioQueue explicitly bound to the selected input UID, verified before/after
+start and before PCM delivery. Serial conversion retains mono 16 kHz PCM16;
+running/device-change errors close the delivery gate and synchronous disposal
+finishes callbacks before releasing their context.
+
+101 local Swift tests and the signed release build passed. Native Air tests
+could not run because its Command Line Tools lack XCTest; its release build also
+lacked the SwiftUI macro plugin. The installed build uses the local toolchain.
+After renewed microphone approval, a one-shot launchd job ran all 10 real Air
+built-in input cycles successfully, delivering 15,648–16,372 PCM bytes per cycle,
+verifying the route, stopping each capture, and exiting with status 0. No audio
+was saved or transmitted. No newer crash report appeared during that acceptance;
+the normal app remained running. The test launchd job was removed afterward.
+Direct SSH launch had different TCC attribution and was not treated as a valid
+app microphone approval check. Shortcut-tap registration remains a separate
+permission/acceptance item for this rebuilt app.

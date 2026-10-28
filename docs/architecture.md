@@ -35,7 +35,7 @@ A setup signature contains sorted display vendor/model/serial identities and USB
 - Active input disappears: stop and preserve text.
 - Display or hub changes mid-recording: defer the setup transition until recording ends.
 
-CoreAudio system/input-property listeners, IOKit USB attach/detach notifications and display-change notifications drive refreshes. A 700 ms debounce coalesces device bursts before replacing the idle setup; an eight-second inventory fallback covers missed notifications. Starting dictation during the settling interval asks for a retry. An active input is verified against the engine's actual AudioUnit device. Engine reconfiguration and conversion/format failures synchronously close a PCM delivery gate before stopping on the main actor, keeping already-captured text visible. A fresh UID lookup after the network handshake handles a mic disappearing while connecting.
+CoreAudio system/input-property listeners, IOKit USB attach/detach notifications and display-change notifications drive refreshes. A 700 ms debounce coalesces device bursts before replacing the idle setup; an eight-second inventory fallback covers missed notifications. Starting dictation during the settling interval asks for a retry. Capture uses a device-bound AudioQueue, with CurrentDevice set and checked against the selected microphone UID before/after starting and before delivering each buffer. This changes only the queue's device, never the system default. Input is converted to mono 16 kHz PCM16 on a serial capture queue. Device/running-state notifications and conversion failures synchronously close the PCM delivery gate; synchronous AudioQueue disposal guarantees callbacks have finished before their session context is released, keeping already-captured text visible. A fresh UID lookup after the network handshake handles a mic disappearing while connecting.
 
 Mac device warnings are separate from transient action feedback. Missing/unavailable inputs take priority; a recovered valid input clears that warning without erasing unrelated feedback. Idle choice saves re-enumerate hardware before persisting, refusing an outdated setup/input. The model accepts an injected inventory and can disable observers for deterministic tests of reconnects and deferred transitions; normal builds use CoreAudio/display/USB inventory and observers.
 
@@ -95,3 +95,5 @@ The input view adds system-bar and display-cutout padding, excluding IME insets
 (which describe the keyboard itself). Controls have minimum 48-dp targets, text
 can grow the layout, landscape uses a shorter center, and fullscreen editing is
 disabled. Password restrictions and input/window cancellation stay in place.
+
+The synchronous shortcut event-tap adapter is main-run-loop confined and checks thread ownership directly. It does not call MainActor.assumeIsolated from its C callback. Dictation actions are queued onto the main queue outside the event tap.

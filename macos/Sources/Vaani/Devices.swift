@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import AudioToolbox
 import CoreAudio
 import IOKit
 import VaaniCore
@@ -87,90 +88,144 @@ enum DeviceInventory {
     }
 }
 
-// The selected input is changed only on this engine's AudioUnit, never system-wide.
+// A device-bound input queue avoids AVAudioEngine's automatic aggregate graph.
+// CurrentDevice is set on this queue only; the system default is never changed.
 final class AudioCapture {
-    // Keep the IO unit alive across dictations, including failed starts. On
-    // macOS 27 its asynchronous property listeners can outlive engine teardown.
-    private var engine: AVAudioEngine?
-    private var tapInstalled = false
-    private var configurationObserver: NSObjectProtocol?
-    private var gate: CaptureGate?
+    private var queue: AudioQueueRef?
+    private var session: InputSession?
+    private var deviceID: AudioDeviceID?
+    private let callbackQueue = DispatchQueue(label: "dev.vaani.capture")
+
     func start(deviceID: AudioDeviceID, onChunk: @escaping (Data, Float) -> Void,
                onFailure: @escaping (String) -> Void) throws {
         stop()
-        let engine = self.engine ?? AVAudioEngine()
-        self.engine = engine
-        let input = engine.inputNode
-        guard let unit = input.audioUnit else { throw VaaniError.message("Audio input is unavailable.") }
-        var id = deviceID
-        let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
-        guard status == noErr else { throw VaaniError.message("Could not select microphone (\(status)).") }
-        let source = input.outputFormat(forBus: 0)
-        guard source.sampleRate > 0, source.channelCount > 0,
+        guard let microphone = DeviceInventory.microphones().first(where: { $0.deviceID == deviceID }) else {
+            throw VaaniError.message("The selected microphone is unavailable.")
+        }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var rate: Float64 = 0; var size = UInt32(MemoryLayout<Float64>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate) == noErr,
+              rate > 0, rate <= 384_000,
+              let source = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: true),
               let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: false),
-              let converter = AVAudioConverter(from: source, to: target) else { throw VaaniError.message("Unsupported microphone format.") }
-        let gate = CaptureGate(); self.gate = gate
-        input.installTap(onBus: 0, bufferSize: 2048, format: source) { buffer, _ in
-            guard buffer.format.sampleRate == source.sampleRate, buffer.format.channelCount == source.channelCount else {
-                if gate.close() { onFailure("The microphone format changed. Recording stopped; partial text is preserved.") }
+              let converter = AVAudioConverter(from: source, to: target) else {
+            throw VaaniError.message("Unsupported microphone format.")
+        }
+        let session = InputSession(uid: microphone.id, source: source, target: target, converter: converter,
+                                   onChunk: onChunk, onFailure: onFailure)
+        var format = source.streamDescription.pointee
+        var created: AudioQueueRef?
+        try Self.check(AudioQueueNewInputWithDispatchQueue(&created, &format, 0, callbackQueue) { queue, buffer, _, _, _ in
+            session.receive(queue, buffer)
+        }, "Create microphone input")
+        guard let queue = created else { throw VaaniError.message("Audio input is unavailable.") }
+        self.queue = queue; self.session = session; self.deviceID = deviceID
+        do {
+            let deviceUID = microphone.id as CFString
+            var uid = Unmanaged.passUnretained(deviceUID)
+            try Self.check(AudioQueueSetProperty(queue, kAudioQueueProperty_CurrentDevice, &uid,
+                                                UInt32(MemoryLayout<Unmanaged<CFString>>.size)), "Select microphone")
+            guard Self.currentUID(queue) == microphone.id else {
+                throw VaaniError.message("The selected microphone could not be confirmed.")
+            }
+            let context = Unmanaged.passUnretained(session).toOpaque()
+            for property in [kAudioQueueProperty_IsRunning, kAudioQueueProperty_CurrentDevice] {
+                try Self.check(AudioQueueAddPropertyListener(queue, property, Self.propertyChanged, context), "Monitor microphone")
+            }
+            let bytes = UInt32(max(1024, Int(rate / 10)) * Int(format.mBytesPerFrame))
+            for _ in 0..<3 {
+                var buffer: AudioQueueBufferRef?
+                try Self.check(AudioQueueAllocateBuffer(queue, bytes, &buffer), "Allocate microphone buffer")
+                guard let buffer else { throw VaaniError.message("Microphone buffer unavailable.") }
+                try Self.check(AudioQueueEnqueueBuffer(queue, buffer, 0, nil), "Queue microphone buffer")
+            }
+            try Self.check(AudioQueueStart(queue, nil), "Start microphone")
+            guard isUsing(deviceID: deviceID), session.gate.open() else {
+                throw VaaniError.message("The selected microphone could not be confirmed after starting.")
+            }
+        } catch { stop(); throw error }
+    }
+    func isUsing(deviceID: AudioDeviceID) -> Bool {
+        guard self.deviceID == deviceID, let queue, let session else { return false }
+        var running: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioQueueGetProperty(queue, kAudioQueueProperty_IsRunning, &running, &size) == noErr && running != 0 && Self.currentUID(queue) == session.uid
+    }
+    func stop() {
+        session?.gate.close()
+        if let queue {
+            // Synchronous disposal guarantees no more callbacks before releasing
+            // their session context. A closed gate rejects late PCM immediately.
+            AudioQueueStop(queue, true)
+            AudioQueueDispose(queue, true)
+        }
+        queue = nil; session = nil; deviceID = nil
+    }
+    deinit { stop() }
+    private static func check(_ status: OSStatus, _ operation: String) throws {
+        guard status == noErr else { throw VaaniError.message("\(operation) failed (\(status)).") }
+    }
+    private static func currentUID(_ queue: AudioQueueRef) -> String? {
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioQueueGetProperty(queue, kAudioQueueProperty_CurrentDevice, &value, &size) == noErr else { return nil }
+        return value?.takeRetainedValue() as String?
+    }
+    private static let propertyChanged: AudioQueuePropertyListenerProc = { context, queue, property in
+        guard let context else { return }
+        let session = Unmanaged<InputSession>.fromOpaque(context).takeUnretainedValue()
+        if property == kAudioQueueProperty_CurrentDevice {
+            if currentUID(queue) != session.uid { session.fail("The selected microphone changed. Recording stopped; partial text is preserved.") }
+        } else {
+            var running: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
+            if AudioQueueGetProperty(queue, kAudioQueueProperty_IsRunning, &running, &size) != noErr || running == 0 {
+                session.fail("The microphone stopped. Partial text is preserved.")
+            }
+        }
+    }
+    private final class InputSession {
+        let uid: String
+        let source: AVAudioFormat
+        let target: AVAudioFormat
+        let converter: AVAudioConverter
+        let gate = CaptureGate()
+        let onChunk: (Data, Float) -> Void
+        let onFailure: (String) -> Void
+        init(uid: String, source: AVAudioFormat, target: AVAudioFormat, converter: AVAudioConverter,
+             onChunk: @escaping (Data, Float) -> Void, onFailure: @escaping (String) -> Void) {
+            self.uid = uid; self.source = source; self.target = target; self.converter = converter
+            self.onChunk = onChunk; self.onFailure = onFailure
+        }
+        func fail(_ message: String) { if gate.close() { onFailure(message) } }
+        func receive(_ queue: AudioQueueRef, _ buffer: AudioQueueBufferRef) {
+            defer {
+                let status = AudioQueueEnqueueBuffer(queue, buffer, 0, nil)
+                if status != noErr { fail("Microphone buffering failed. Partial text is preserved.") }
+            }
+            guard currentUID(queue) == uid else {
+                fail("The selected microphone changed. Recording stopped; partial text is preserved.")
                 return
             }
-            let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * 16000 / source.sampleRate) + 16)
+            let frames = AVAudioFrameCount(buffer.pointee.mAudioDataByteSize / source.streamDescription.pointee.mBytesPerFrame)
+            guard frames > 0, let input = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: frames) else { return }
+            input.frameLength = frames
+            guard let destination = input.mutableAudioBufferList.pointee.mBuffers.mData else { return }
+            memcpy(destination, buffer.pointee.mAudioData, Int(buffer.pointee.mAudioDataByteSize))
+            let capacity = AVAudioFrameCount(ceil(Double(frames) * 16000 / source.sampleRate) + 16)
             guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
             var supplied = false; var error: NSError?
             converter.convert(to: output, error: &error) { _, status in
                 if supplied { status.pointee = .noDataNow; return nil }
-                supplied = true; status.pointee = .haveData; return buffer
+                supplied = true; status.pointee = .haveData; return input
             }
-            if error != nil {
-                if gate.close() { onFailure("Microphone audio conversion failed. Recording stopped; partial text is preserved.") }
-                return
-            }
+            guard error == nil else { fail("Microphone audio conversion failed. Partial text is preserved."); return }
             guard let samples = output.int16ChannelData?[0], output.frameLength > 0 else { return }
             let length = Int(output.frameLength)
             var sum: Float = 0
             for index in 0..<length { let value = Float(samples[index]) / 32768; sum += value * value }
             gate.deliver { onChunk(Data(bytes: samples, count: length * 2), min(1, sqrt(sum / Float(length)) * 5)) }
         }
-        tapInstalled = true
-        engine.prepare()
-        do {
-            try engine.start()
-            guard isUsing(deviceID: deviceID) else { throw VaaniError.message("The selected microphone could not be confirmed.") }
-            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
-                object: engine, queue: nil) { _ in
-                    // Core Audio can notify after startup when only the engine's
-                    // output/aggregate device settles. Keep recording only if
-                    // the input is still running with exactly the chosen route
-                    // and format; real input changes still close the PCM gate.
-                    var current: AudioDeviceID = 0
-                    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-                    let routeStatus = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
-                        kAudioUnitScope_Global, 0, &current, &size)
-                    if engine.isRunning, routeStatus == noErr, current == deviceID,
-                       input.outputFormat(forBus: 0).isEqual(source) { return }
-                    // Close the PCM gate synchronously, before hopping to the UI.
-                    if gate.close() { onFailure("The audio input was reconfigured. Recording stopped; partial text is preserved.") }
-                }
-            guard gate.open() else { throw VaaniError.message("Audio configuration changed while starting. Try recording again.") }
-        } catch {
-            stop()
-            throw error
-        }
     }
-    func isUsing(deviceID: AudioDeviceID) -> Bool {
-        guard let engine, engine.isRunning, let unit = engine.inputNode.audioUnit else { return false }
-        var current: AudioDeviceID = 0; var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        return AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &current, &size) == noErr && current == deviceID
-    }
-    func stop() {
-        gate?.close(); gate = nil
-        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
-        configurationObserver = nil
-        if tapInstalled { engine?.inputNode.removeTap(onBus: 0); tapInstalled = false }
-        engine?.stop()
-    }
-    deinit { stop() }
 }
 
 private final class CaptureGate {
