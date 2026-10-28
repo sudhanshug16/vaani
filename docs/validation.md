@@ -750,3 +750,23 @@ over SSH, backing up the prior app. Remote version/build readback was 0.1.1/1001
 and executable SHA256 matched the downloaded artifact. The existing GUI process
 was still running its previous executable; quit/reopen is required to load the
 fix. New real-microphone or paste acceptance is not claimed by these UI checks.
+
+## Private real-audio A/B harness (2026-10-29)
+
+`SpeechAudioProcessorTests/testOptionalRealAudioComparison` accepts an opt-in
+`VAANI_REAL_AUDIO_FIXTURE` path to a mono Float32 48 kHz WAV of up to 60 seconds.
+It exports `original.pcm` and `enhanced.pcm` alongside the private fixture,
+using the production resampler/processor and 100 ms input chunks. It adds no
+synthetic noise or normalization. PCM files are 0600; keep their containing
+directory private and outside the checkout. No recordings or transcripts are
+included in the repository. Run these PCM files through `--transcribe-pcm`
+with identical fixture settings for a controlled Sarvam realtime comparison.
+The harness validates framing and finite levels; it does not assert that either
+pipeline improves recognition. Accuracy requires a human reference transcript.
+
+Full Swift suite: 118 cases, 2 optional fixtures skipped, zero failures. The
+private real-audio export was also run explicitly and passed. GitHub's first
+permanent-signing release attempt failed to resolve the private signing key on
+the hosted runner; the restore script now uses the certificate fingerprint and
+adds its isolated keychain to the runner's search list. Local fingerprint-based
+import/sign/verify passes; hosted-runner verification is separate.

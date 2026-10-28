@@ -86,6 +86,35 @@ final class SpeechAudioProcessorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         XCTAssertThrowsError(try SpeechDenoiser(modelURL: url))
     }
+    /// Opt-in private real-audio A/B export. No fixture bytes belong in Git.
+    /// Decode to mono Float32 48 kHz WAV before setting VAANI_REAL_AUDIO_FIXTURE.
+    func testOptionalRealAudioComparison() throws {
+        guard let path = ProcessInfo.processInfo.environment["VAANI_REAL_AUDIO_FIXTURE"] else {
+            throw XCTSkip("Opt-in private real-audio comparison")
+        }
+        let url = URL(fileURLWithPath: path)
+        let file = try AVAudioFile(forReading: url)
+        XCTAssertEqual(file.processingFormat.sampleRate, 48000)
+        XCTAssertEqual(file.processingFormat.channelCount, 1)
+        guard file.length > 0, file.length <= 48000 * 60 else {
+            XCTFail("Use a recording of at most 60 seconds"); return
+        }
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: buffer)
+        let samples = Array(UnsafeBufferPointer(start: try XCTUnwrap(buffer.floatChannelData?[0]), count: Int(buffer.frameLength)))
+        // Same decoded recording and capture chunking, with no injected noise,
+        // normalization, padding or alterations before either processing path.
+        for (name, mode) in [("original", SpeechAudioProcessor.Mode.original), ("enhanced", .enhanced)] {
+            let (pcm, levels) = try run(samples, chunk: 4800, mode: mode)
+            XCTAssertFalse(pcm.isEmpty)
+            XCTAssertTrue(levels.allSatisfy(\.isFinite))
+            let output = url.deletingLastPathComponent().appendingPathComponent("\(name).pcm")
+            try pcm.withUnsafeBytes { try Data($0).write(to: output, options: .atomic) }
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
+            let rms = sqrt(pcm.reduce(0.0) { $0 + pow(Double($1) / 32768, 2) } / Double(pcm.count))
+            print("Real audio \(name): samples=\(pcm.count), RMS=\(rms)")
+        }
+    }
     func testOptionalLocalSyntheticSpeechFixture() throws {
         guard let path = ProcessInfo.processInfo.environment["VAANI_SYNTHETIC_SPEECH"] else {
             throw XCTSkip("Opt-in local synthesized speech fixture")
