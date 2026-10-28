@@ -671,3 +671,12 @@ The C inference sources also passed an x86_64 macOS syntax check (baseline SSE2
 performance warnings only). Uploads retain capture-sized chunks of roughly
 100 ms rather than sending every 10 ms RNNoise frame, preserving the existing
 stream queue's buffering duration and message frequency.
+
+The final signed build was installed in Air's /Applications/Vaani.app; its
+packaged processing smoke again passed all 10 cycles (10 seconds of synthetic
+audio in about 0.20 seconds, exit 0). A one-shot GUI-domain launchd attempt at
+the real microphone lifecycle check exited before capture because this rebuild
+requires renewed microphone permission. It did not request approval, save or
+send audio. The temporary launchd job was removed. The existing GUI process
+remained running on its earlier executable; the user must quit/reopen the app
+and approve microphone access before real-mic acceptance of this build.
