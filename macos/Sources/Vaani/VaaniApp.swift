@@ -440,7 +440,7 @@ struct SettingsView: View {
                 }
                 Picker("Speech model", selection: $store.shared.sarvamModel) { Text("Saaras v3 Realtime").tag("saaras:v3-realtime"); Text("Saaras v4").tag("saaras:v4") }
                 Text("For Hinglish, use Auto-detect and Romanized / Latin script to keep Hindi in Latin letters and preserve English words.").font(.caption).foregroundStyle(.secondary)
-                Text("A nonempty dictionary uses Saaras v4, which supports recognition hints, regardless of this selection.").font(.caption).foregroundStyle(.secondary)
+                Text("Speech recognition hints in Dictionary can override this selection with Saaras v4 when explicitly enabled.").font(.caption).foregroundStyle(.secondary)
                 Text("Audio streams to Sarvam only while recording. Vaani does not save audio or transcript history.").font(.caption).foregroundStyle(.secondary)
             }
             card("Microphone access") {
@@ -556,6 +556,8 @@ struct SettingsView: View {
     private var dictionaryPage: some View {
         card("Personal dictionary") {
             Text("Add the exact spelling you want for a name, word or short phrase. For example: Vaani, Sarvam, Sudhanshu. No commas, arrows or special format needed—add each spelling separately.").font(.callout).foregroundStyle(.secondary)
+            Toggle("Use dictionary as speech recognition hints", isOn: $store.shared.recognitionHintsEnabled)
+            Text("Off by default: hints can insert unrelated names in quiet or noisy speech. Polishing still uses your dictionary. Enabling hints with entries uses Saaras v4.").font(.caption).foregroundStyle(.secondary)
             Text(dictionaryEditingIndex == nil ? "Preferred spelling" : "Edit spelling").font(.caption).foregroundStyle(.secondary)
             HStack {
                 TextField("e.g. Vaani", text: $dictionaryDraft).textFieldStyle(.roundedBorder).onSubmit(saveDictionaryEntry)
@@ -583,7 +585,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            Text("These spellings guide Sarvam recognition and optional polishing; they are not forced replacements. A nonempty dictionary uses Saaras v4. Clearing all entries restores your selected speech model.").font(.caption).foregroundStyle(.secondary)
+            Text("These spellings guide optional polishing. They affect speech recognition only when hints are enabled; they are not forced replacements.").font(.caption).foregroundStyle(.secondary)
         }
     }
     private func saveDictionaryEntry() {

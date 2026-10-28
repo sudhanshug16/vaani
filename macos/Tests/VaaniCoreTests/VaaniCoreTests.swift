@@ -68,6 +68,7 @@ final class VaaniCoreTests: XCTestCase {
     }
     func testDictionaryHintsAreAJSONEncodedArray() throws {
         var preferences = SharedPreferences()
+        preferences.recognitionHintsEnabled = true
         preferences.dictionary = ["Vaani", "New Delhi", "ACME, Inc.", "say \"hello\"", "हिंदी", "C++"]
         let url = SarvamProtocol.url(preferences: preferences)
         let params = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
@@ -77,6 +78,23 @@ final class VaaniCoreTests: XCTestCase {
         let empty = URLComponents(url: SarvamProtocol.url(preferences: SharedPreferences()), resolvingAgainstBaseURL: false)!
         XCTAssertFalse(empty.queryItems!.contains { $0.name == "keyterms" })
         XCTAssertEqual(empty.queryItems!.first { $0.name == "model" }?.value, "saaras:v3-realtime")
+    }
+    func testDictionaryDoesNotBiasSpeechWithoutExplicitOptIn() throws {
+        var prefs = SharedPreferences(); prefs.sarvamModel = "saaras:v4"; prefs.dictionary = ["Acme", "Nova"]
+        let url = try XCTUnwrap(URLComponents(url: SarvamProtocol.url(preferences: prefs), resolvingAgainstBaseURL: false))
+        XCTAssertFalse(url.queryItems!.contains { $0.name == "keyterms" })
+        XCTAssertEqual(url.queryItems!.first { $0.name == "model" }?.value, "saaras:v4")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(prefs)) as? [String: Any])
+        object.removeValue(forKey: "recognitionHintsEnabled")
+        object["prompt"] = SharedPreferences.legacyDefaultPrompt + " "
+        let legacy = try JSONDecoder().decode(SharedPreferences.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertFalse(legacy.recognitionHintsEnabled)
+        XCTAssertEqual(legacy.dictionary, prefs.dictionary)
+        XCTAssertEqual(legacy.prompt, SharedPreferences.defaultPrompt)
+        object["prompt"] = "My custom punctuation rules."
+        XCTAssertEqual(try JSONDecoder().decode(SharedPreferences.self, from: JSONSerialization.data(withJSONObject: object)).prompt, "My custom punctuation rules.")
+        object["recognitionHintsEnabled"] = "true"
+        XCTAssertThrowsError(try JSONDecoder().decode(SharedPreferences.self, from: JSONSerialization.data(withJSONObject: object)))
     }
     func testSharedExampleImportsAndStripsUnknownFieldsOnReexport() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -8,7 +8,10 @@ if [[ -n "${VAANI_ARCH:-}" ]]; then
 fi
 swift build "${build_args[@]}"
 bin_path=$(swift build "${build_args[@]}" --show-bin-path)
-app_path="$project_root/build/Vaani.app"
+mkdir -p "$project_root/build"
+staging_root=$(mktemp -d "$project_root/build/.Vaani-stage.XXXXXX")
+trap 'rm -rf "$staging_root"' EXIT
+app_path="$staging_root/Vaani.app"
 mkdir -p "$app_path/Contents/MacOS"
 cp "$bin_path/Vaani" "$app_path/Contents/MacOS/Vaani"
 cp "$project_root/macos/Info.plist" "$app_path/Contents/Info.plist"
@@ -24,7 +27,21 @@ fi
 # ad-hoc when this keychain exists: failure must stop deployment.
 local_keychain="$HOME/Library/Application Support/Vaani/release-signing/macos-build.keychain-db"
 if [[ -z "${VAANI_SIGN_IDENTITY:-}" && -f "$local_keychain" ]]; then
-  VAANI_SIGN_IDENTITY='Vaani Release Signing'
+  VAANI_SIGN_IDENTITY=$(python3 - "$local_keychain" <<'PY_SIGN'
+import pathlib, re, subprocess, sys
+keychain = pathlib.Path(sys.argv[1])
+password_file = keychain.parent / "macos-password"
+if password_file.exists():
+    result = subprocess.run(["security", "unlock-keychain", "-p", password_file.read_text().strip(), str(keychain)], capture_output=True)
+    if result.returncode:
+        raise SystemExit("Could not unlock the permanent build keychain")
+result = subprocess.run(["security", "find-certificate", "-c", "Vaani Release Signing", "-Z", str(keychain)], capture_output=True, text=True)
+match = re.search(r"SHA-1 hash: ([A-Fa-f0-9]{40})", result.stdout)
+if result.returncode or not match:
+    raise SystemExit("Permanent signing certificate is unavailable; refusing ad-hoc fallback")
+print(match.group(1))
+PY_SIGN
+  )
   VAANI_SIGN_KEYCHAIN="$local_keychain"
 fi
 sign_args=(--force --sign "${VAANI_SIGN_IDENTITY:--}" --identifier dev.vaani.mac)
@@ -33,4 +50,10 @@ if [[ -n "${VAANI_SIGN_KEYCHAIN:-}" ]]; then
 fi
 codesign "${sign_args[@]}" "$app_path"
 codesign --verify --deep --strict "$app_path"
-printf '%s\n' "$app_path"
+final_path="$project_root/build/Vaani.app"
+if [[ -e "$final_path" ]]; then mv "$final_path" "$staging_root/previous.app"; fi
+if ! mv "$app_path" "$final_path"; then
+  if [[ -e "$staging_root/previous.app" ]]; then mv "$staging_root/previous.app" "$final_path"; fi
+  exit 1
+fi
+printf '%s\n' "$final_path"

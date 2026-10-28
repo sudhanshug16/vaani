@@ -770,3 +770,31 @@ permanent-signing release attempt failed to resolve the private signing key on
 the hosted runner; the restore script now uses the certificate fingerprint and
 adds its isolated keychain to the runner's search list. Local fingerprint-based
 import/sign/verify passes; hosted-runner verification is separate.
+
+
+## Recognition bias and conservative polishing (2026-10-29)
+
+Private user recordings were evaluated in two separately labelled microphone
+cohorts. Fixed v4/language/output settings isolated the full dictionary, removal
+of one entry, and no keyterms. Quiet recordings reproduced unrelated dictionary
+names in raw STT; polishing subsequently retained or canonicalized those names.
+The release therefore makes speech hints explicitly opt-in, default off, while
+retaining the dictionary for polishing. This is not a claim that keyterms always
+hurt recognition. Recordings, actual dictionaries and transcripts are excluded
+from Git.
+
+The same Sarvam key successfully exercised `gemma4` at `/v2/responses` using
+Bearer authentication and the app's independent, non-streaming Responses shape.
+A stricter default prompt plus JSON transcript input preserved dictated
+instructions that the earlier prompt sometimes omitted. Additional explicit
+self-correction rules were tested on the selected-microphone cohort. Custom
+prompts are not migrated; only text matching the old default, ignoring
+whitespace, changes. These small exploratory samples do not establish a general
+accuracy rate or deterministic model behavior.
+
+Swift: 119 cases, 2 optional fixture skips, zero failures. Android: 51 JVM cases
+pass; release lint passes. The packaged app's original/enhanced synthetic
+processing smoke passes, and its certificate requirement matches the permanent
+release identity. Local packaging now signs a clean staging bundle and replaces
+the completed app afterward, so building cannot overwrite a running test
+executable or retain an interrupted codesign temporary resource.

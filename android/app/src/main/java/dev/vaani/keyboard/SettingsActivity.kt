@@ -37,6 +37,7 @@ class SettingsActivity : Activity() {
     private lateinit var model: EditText
     private lateinit var prompt: EditText
     private val dictionaryWords = mutableListOf<String>()
+    private lateinit var recognitionHints: Switch
     private lateinit var dictionaryEntry: EditText
     private lateinit var dictionaryList: LinearLayout
     private lateinit var dictionaryCount: TextView
@@ -105,7 +106,7 @@ class SettingsActivity : Activity() {
         mode = spinner("Output", Preferences.modes.map(SpeechChoices::output))
         label("For Hinglish, choose Auto-detect and Romanized / Latin script to keep Hindi in Latin letters and preserve English words.")
         speechModel = spinner("Speech model", listOf("Saaras v3 Realtime", "Saaras v4"))
-        label("A nonempty dictionary uses Saaras v4 for recognition hints. Clearing it restores the selected speech model.")
+        label("Speech recognition hints in Dictionary can override this selection with Saaras v4 when explicitly enabled.")
         section("Microphones")
         microphone = spinner("Microphone · remembered for this audio setup", listOf(getString(R.string.choose_microphone)))
         profiles = spinner("Microphone profile", listOf(getString(R.string.automatic_profile)))
@@ -138,6 +139,15 @@ class SettingsActivity : Activity() {
         prompt = field("Post-processing prompt", multiline = true)
         section("Dictionary")
         label("Add the exact spelling you want for a name, word or short phrase. Examples: Vaani, Sarvam, Sudhanshu. Add each spelling separately; no commas, arrows or special format needed.")
+        recognitionHints = Switch(this).apply {
+            text = "Use dictionary as speech recognition hints"
+            root.addView(this)
+            setOnCheckedChangeListener { _, checked -> attempt {
+                prefs.shared = prefs.shared.put("recognitionHintsEnabled", checked)
+                "Speech recognition hints saved."
+            } }
+        }
+        label("Off by default: hints can insert unrelated names in quiet or noisy speech. Polishing still uses your dictionary. Enabling hints with entries uses Saaras v4.")
         dictionaryEntry = field("Preferred spelling · e.g. Vaani")
         val dictionaryActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         dictionaryAdd = actionButton("Add spelling") { saveDictionaryEntry() }
@@ -148,7 +158,7 @@ class SettingsActivity : Activity() {
         dictionaryCount = label("")
         dictionaryList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(dictionaryList)
-        label("These spellings guide recognition and optional polishing; they are not forced replacements. A nonempty dictionary uses Saaras v4. Removing all entries restores your selected speech model.")
+        label("These spellings guide optional polishing. They affect speech recognition only when hints are enabled; they are not forced replacements.")
         section("Devices")
         button("Import shared settings…") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "application/json"; addCategory(Intent.CATEGORY_OPENABLE) }, 20) }
         button("Save & export shared settings…") {
@@ -210,6 +220,7 @@ class SettingsActivity : Activity() {
         mode.setSelection(Preferences.modes.indexOf(shared.getString("mode")).coerceAtLeast(0))
         speechModel.setSelection(Preferences.speechModels.indexOf(shared.getString("sarvamModel")).coerceAtLeast(0))
         endpoint.setText(shared.getString("endpoint")); model.setText(shared.getString("model")); prompt.setText(shared.getString("prompt"))
+        recognitionHints.isChecked = shared.optBoolean("recognitionHintsEnabled", false)
         enabled.isChecked = shared.getBoolean("processingEnabled")
         reasoningEffort.setSelection(Preferences.reasoningEfforts.indexOf(shared.getString("reasoningEffort")).coerceAtLeast(0))
         serviceTier.setSelection(Preferences.serviceTiers.indexOf(shared.optString("serviceTier", "")).coerceAtLeast(0))
@@ -224,6 +235,7 @@ class SettingsActivity : Activity() {
             .put("prompt", prompt.text.toString()).put("processingEnabled", enabled.isChecked)
             .put("reasoningEffort", Preferences.reasoningEfforts[reasoningEffort.selectedItemPosition])
             .put("serviceTier", Preferences.serviceTiers[serviceTier.selectedItemPosition])
+            .put("recognitionHintsEnabled", recognitionHints.isChecked)
             .put("dictionary", JSONArray(dictionaryWords))
     private fun resetDictionaryEntry() {
         dictionaryEditingIndex = null; dictionaryEntry.setText("")

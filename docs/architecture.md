@@ -16,7 +16,7 @@ Authenticate with `Api-Subscription-Key`. Default model is `saaras:v3-realtime`;
 
 macOS resamples the selected input through AVAudioConverter and has a bounded send queue. Android reads PCM16 directly, caps the WebSocket queue and verifies an explicit preferred route before transmitting each chunk. Neither implementation reconnects an active recording automatically: losing or duplicating an unknown span of speech is worse than a clear retry.
 
-Dictionary entries are serialized as a JSON array in the `keyterms` query parameter. Sarvam currently accepts these hints only on `saaras:v4`; a nonempty dictionary therefore selects v4 for that session on both platforms. The stored model choice is preserved and resumes when the dictionary is cleared. Settings disclose this behavior. Dictionary entries also accompany optional polishing; neither hinting nor polishing promises exact recognition.
+Dictionary entries are sent as a JSON array in `keyterms` only when recognition hints are explicitly enabled. Sarvam accepts these hints only on `saaras:v4`; enabling hints with entries selects v4 for that session. With hints off or no entries, the stored model choice is used. Dictionary entries also accompany optional polishing; neither hinting nor polishing promises exact recognition.
 
 Reference checked on 2026-10-28: [Sarvam realtime specification](https://docs.sarvam.ai/api-reference/speech-to-text/transcribe/realtime/ws.md). No legacy WebSocket wire format is assumed.
 
@@ -97,3 +97,20 @@ can grow the layout, landscape uses a shorter center, and fullscreen editing is
 disabled. Password restrictions and input/window cancellation stay in place.
 
 The synchronous shortcut event-tap adapter is main-run-loop confined and checks thread ownership directly. It does not call MainActor.assumeIsolated from its C callback. Dictation actions are queued onto the main queue outside the event tap.
+
+
+## Dictionary bias controls
+
+`recognitionHintsEnabled` is an optional shared boolean, default false for older
+settings too. Dictionary entries always remain available to optional polishing.
+Only explicitly enabled, nonempty recognition hints send Sarvam keyterms and
+select v4; disabling hints retains the user's chosen model. Quiet real-audio
+fixtures reproduced unrelated dictionary names in raw STT, so hints are no
+longer implicit. User recordings and evaluation transcripts stay outside Git.
+
+Polishing sends a JSON transcript object separately from the developer prefix
+and JSON dictionary array. The new default prompt preserves spoken instructions
+as text and only removes explicit disfluencies. Old default text, ignoring
+whitespace differences, migrates during loading/canonicalization; custom prompt
+text is unchanged. The prompt-cache hash includes the dictionary and prompt;
+recordings and transcripts never enter the routing key.

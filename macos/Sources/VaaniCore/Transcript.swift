@@ -30,9 +30,10 @@ public struct SpeechEvent: Decodable {
 
 public enum SarvamProtocol {
     public static func url(preferences: SharedPreferences) -> URL {
+        let useHints = preferences.recognitionHintsEnabled && !preferences.dictionary.isEmpty
         var url = URLComponents(string: "wss://api.sarvam.ai/speech-to-text-realtime/ws")!
         url.queryItems = [
-            .init(name: "model", value: preferences.dictionary.isEmpty ? preferences.sarvamModel : "saaras:v4"),
+            .init(name: "model", value: useHints ? "saaras:v4" : preferences.sarvamModel),
             .init(name: "language_code", value: preferences.language),
             .init(name: "mode", value: preferences.mode),
             .init(name: "stream_type", value: "balanced"),
@@ -40,7 +41,7 @@ public enum SarvamProtocol {
             .init(name: "sample_rate", value: "16000"),
             .init(name: "endpointing", value: "vad")
         ]
-        if !preferences.dictionary.isEmpty {
+        if useHints {
             let terms = try! JSONEncoder().encode(preferences.dictionary)
             url.queryItems?.append(.init(name: "keyterms", value: String(decoding: terms, as: UTF8.self)))
         }
