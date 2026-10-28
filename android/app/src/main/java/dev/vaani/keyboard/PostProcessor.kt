@@ -27,6 +27,7 @@ object PostProcessor {
                 .put(JSONObject().put("role", "user").put("content", text)))
         val tier = settings.optString("serviceTier", "")
         if (tier.isNotEmpty()) body.put("service_tier", tier)
+        if (settings.getString("model") == "gpt-6-luna") body.put("reasoning", JSONObject().put("effort", "none"))
         val request = Request.Builder().url(Preferences.responsesUrl(settings.getString("endpoint")))
             .post(body.toString().toRequestBody("application/json".toMediaType()))
         if (key.isNotBlank()) request.header("Authorization", "Bearer $key")

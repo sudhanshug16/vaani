@@ -38,6 +38,8 @@ In **Voice**, use **Allow microphone** to complete microphone setup independentl
 
 Polishing keeps the developer prompt and dictionary before the changing transcript and supplies a stable SHA-256-based `prompt_cache_key` derived only from that prefix. Requests are independent and use `store: false`; dictations are not chained or cached locally. Provider-side prefix caching remains automatic and depends on model support, minimum prefix length and cache availability. The short default prompt may fall below the caching threshold; the app does not pad prompts or force model-specific cache retention/options.
 
+When the model is `gpt-6-luna`, polishing explicitly sends `reasoning: {"effort":"none"}` to disable reasoning. Other model names keep their provider's reasoning behavior; not every model supports `none`. Each dictation uses a single Responses request, independently of the service tier.
+
 **Dictionary** accepts one spelling per line and supplies it as recognition hints and processing context. A nonempty dictionary uses Saaras v4 because v3 Realtime does not support recognition hints; clearing it restores the selected speech model. Recognition hints improve probability; they are not guaranteed replacements.
 
 A read-only hardware diagnostic is also available:

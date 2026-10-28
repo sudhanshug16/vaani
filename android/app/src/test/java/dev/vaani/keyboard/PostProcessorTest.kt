@@ -86,6 +86,16 @@ class PostProcessorTest {
             reply(body = body)
         }
     }
+    @Test fun lunaDisablesReasoningWithoutChangingOtherModels() {
+        for (model in listOf("gpt-6-luna", "fixture-model")) {
+            action = { prefs -> PostProcessor.process("raw", prefs.put("model", model), "", OkHttpClient()) }
+            reply(body = """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Done."}]}]}""") { _, _, body ->
+                val request = JSONObject(body)
+                if (model == "gpt-6-luna") assertEquals("none", request.getJSONObject("reasoning").getString("effort"))
+                else assertFalse(request.has("reasoning"))
+            }
+        }
+    }
     @Test fun nullBlankAndNonTextContentAreRejected() {
         for (content in listOf("null", "\" \"", "42", "[]")) {
             action = { prefs -> assertThrows(Exception::class.java) { PostProcessor.process("raw", prefs, "", OkHttpClient()) } }
