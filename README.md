@@ -42,7 +42,9 @@ Polishing keeps the developer prompt and dictionary before the changing transcri
 
 Polish also offers **Reasoning effort**: Provider default (parameter omitted), None (off), Minimal, Low, Medium, High, Xhigh and Max. The selected value is saved and synced, and sent as `reasoning.effort`. Supported values depend on the model; `gpt-6-luna` supports None. Older saved Luna settings retain None until changed; explicit Provider default removes the override. Each dictation uses a single Responses request, independently of service tier and effort.
 
-**Dictionary** accepts one spelling per line and supplies it as recognition hints and processing context. A nonempty dictionary uses Saaras v4 because v3 Realtime does not support recognition hints; clearing it restores the selected speech model. Recognition hints improve probability; they are not guaranteed replacements.
+**Dictionary** has an Add/Edit/Remove form on Mac and Android. Enter a preferred spelling such as `Vaani`, `Sarvam` or `Sudhanshu`, then choose Add spelling. Each entry can be a name, word or short phrase (up to 120 characters); no comma-separated list, arrow or replacement syntax is required. Up to 500 entries are saved automatically. The list supplies recognition hints and optional polishing context. A nonempty dictionary uses Saaras v4 because v3 Realtime does not support recognition hints; clearing it restores the selected speech model. Recognition hints improve probability; they are not guaranteed replacements. Settings export/sync keeps the same array-of-strings format.
+
+Version tags build draft pre-releases with Mac Apple-silicon/Intel ZIPs, a signed Android APK and checksums. See [releases](docs/releases.md) for tagging, signing and installation details.
 
 A read-only hardware diagnostic is also available:
 

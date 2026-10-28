@@ -306,6 +306,8 @@ struct SettingsView: View {
     @State private var microphonePermission = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var requestingMicrophone = false
     @State private var dictionaryDraft = ""
+    @State private var dictionaryEditingIndex: Int?
+    @State private var dictionaryNotice = ""
     private let pages = [("Voice", "waveform"), ("Microphones", "mic"), ("Polish", "sparkles"), ("Dictionary", "text.book.closed"), ("Devices", "point.3.connected.trianglepath.dotted")]
     var body: some View {
         HStack(spacing: 0) {
@@ -389,11 +391,12 @@ struct SettingsView: View {
             .onAppear {
                 do { if !model.isSyncFixture { sarvamKey = try Vault.read("sarvam"); processingKey = try Vault.read("processing") } }
                 catch { keyNotice = error.localizedDescription }
-                dictionaryDraft = store.shared.dictionary.joined(separator: "\n")
             }
-            .onChange(of: store.shared.dictionary) { _, words in
-                let edited = dictionaryDraft.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                if edited != words { dictionaryDraft = words.joined(separator: "\n") }
+            .onChange(of: store.shared.dictionary) { _, _ in
+                if dictionaryEditingIndex != nil {
+                    dictionaryEditingIndex = nil; dictionaryDraft = ""
+                    dictionaryNotice = "Dictionary changed. Select an entry again to edit it."
+                }
             }
             .onChange(of: store.shared) { _, _ in store.save() }
     }
@@ -552,13 +555,53 @@ struct SettingsView: View {
     }
     private var dictionaryPage: some View {
         card("Personal dictionary") {
-            Text("One spelling per line. A nonempty dictionary uses Saaras v4 for recognition hints and is included in the polishing prompt. Spellings are suggestions, not guaranteed replacements.").font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: Binding(get: { dictionaryDraft }, set: {
-                dictionaryDraft = $0
-                store.shared.dictionary = $0.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            })).font(.system(size: 14)).frame(minHeight: 270).scrollContentBackground(.hidden)
-            Text("\(store.shared.dictionary.count) / 500 words").font(.caption).foregroundStyle(.secondary)
+            Text("Add the exact spelling you want for a name, word or short phrase. For example: Vaani, Sarvam, Sudhanshu. No commas, arrows or special format needed—add each spelling separately.").font(.callout).foregroundStyle(.secondary)
+            Text(dictionaryEditingIndex == nil ? "Preferred spelling" : "Edit spelling").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("e.g. Vaani", text: $dictionaryDraft).textFieldStyle(.roundedBorder).onSubmit(saveDictionaryEntry)
+                Button(dictionaryEditingIndex == nil ? "Add spelling" : "Save spelling", action: saveDictionaryEntry)
+                    .disabled(dictionaryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if dictionaryEditingIndex != nil {
+                    Button("Cancel") { dictionaryEditingIndex = nil; dictionaryDraft = ""; dictionaryNotice = "" }
+                }
+            }
+            Text("\(store.shared.dictionary.count) / 500 entries · up to 120 characters each · saved automatically").font(.caption).foregroundStyle(.secondary)
+            if !dictionaryNotice.isEmpty { Text(dictionaryNotice).font(.caption).foregroundStyle(accent) }
+            if store.shared.dictionary.isEmpty {
+                Text("No spellings yet. Add names, places or terms that dictation often gets wrong.").foregroundStyle(.secondary).padding(.vertical, 18)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(store.shared.dictionary.enumerated()), id: \.offset) { index, word in
+                        HStack {
+                            Text(word).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Edit") { dictionaryEditingIndex = index; dictionaryDraft = word; dictionaryNotice = "" }
+                            Button("Remove", role: .destructive) {
+                                dictionaryEditingIndex = nil; dictionaryDraft = ""; dictionaryNotice = ""
+                                store.shared.dictionary.remove(at: index)
+                            }
+                        }.padding(10).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            Text("These spellings guide Sarvam recognition and optional polishing; they are not forced replacements. A nonempty dictionary uses Saaras v4. Clearing all entries restores your selected speech model.").font(.caption).foregroundStyle(.secondary)
         }
+    }
+    private func saveDictionaryEntry() {
+        let word = dictionaryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !word.isEmpty else { return }
+        guard word.unicodeScalars.count <= 120, !word.contains(where: \.isNewline) else {
+            dictionaryNotice = "Use one spelling or short phrase, up to 120 characters."; return
+        }
+        let editing = dictionaryEditingIndex
+        guard !store.shared.dictionary.enumerated().contains(where: { $0.offset != editing && $0.element.caseInsensitiveCompare(word) == .orderedSame }) else {
+            dictionaryNotice = "That spelling is already in your dictionary."; return
+        }
+        guard editing != nil || store.shared.dictionary.count < 500 else {
+            dictionaryNotice = "Dictionary is full. Remove an entry before adding another."; return
+        }
+        dictionaryEditingIndex = nil; dictionaryDraft = ""; dictionaryNotice = "Saved."
+        if let editing, store.shared.dictionary.indices.contains(editing) { store.shared.dictionary[editing] = word }
+        else { store.shared.dictionary.append(word) }
     }
     private var devicesPage: some View {
         VStack(alignment: .leading, spacing: 20) {

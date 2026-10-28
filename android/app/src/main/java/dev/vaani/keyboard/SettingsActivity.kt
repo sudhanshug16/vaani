@@ -36,7 +36,13 @@ class SettingsActivity : Activity() {
     private lateinit var endpoint: EditText
     private lateinit var model: EditText
     private lateinit var prompt: EditText
-    private lateinit var dictionary: EditText
+    private val dictionaryWords = mutableListOf<String>()
+    private lateinit var dictionaryEntry: EditText
+    private lateinit var dictionaryList: LinearLayout
+    private lateinit var dictionaryCount: TextView
+    private lateinit var dictionaryAdd: Button
+    private lateinit var dictionaryCancel: Button
+    private var dictionaryEditingIndex: Int? = null
     private lateinit var enabled: Switch
     private lateinit var language: Spinner
     private lateinit var mode: Spinner
@@ -131,8 +137,18 @@ class SettingsActivity : Activity() {
         label("Provider default leaves the tier unspecified. Fast / Priority may cost more; tier availability depends on your provider and model.")
         prompt = field("Post-processing prompt", multiline = true)
         section("Dictionary")
-        dictionary = field("Dictionary · one word per line", multiline = true)
-        label("A nonempty dictionary uses Saaras v4 for recognition hints. Spellings are suggestions, not guaranteed replacements. The dictionary also guides optional polishing.")
+        label("Add the exact spelling you want for a name, word or short phrase. Examples: Vaani, Sarvam, Sudhanshu. Add each spelling separately; no commas, arrows or special format needed.")
+        dictionaryEntry = field("Preferred spelling · e.g. Vaani")
+        val dictionaryActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        dictionaryAdd = actionButton("Add spelling") { saveDictionaryEntry() }
+        dictionaryCancel = actionButton("Cancel edit") { resetDictionaryEntry() }.apply { visibility = View.GONE }
+        dictionaryActions.addView(dictionaryAdd, LinearLayout.LayoutParams(0, dp(48), 1f))
+        dictionaryActions.addView(dictionaryCancel, LinearLayout.LayoutParams(-2, dp(48)))
+        root.addView(dictionaryActions)
+        dictionaryCount = label("")
+        dictionaryList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(dictionaryList)
+        label("These spellings guide recognition and optional polishing; they are not forced replacements. A nonempty dictionary uses Saaras v4. Removing all entries restores your selected speech model.")
         section("Devices")
         button("Import shared settings…") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "application/json"; addCategory(Intent.CATEGORY_OPENABLE) }, 20) }
         button("Save & export shared settings…") {
@@ -198,7 +214,9 @@ class SettingsActivity : Activity() {
         reasoningEffort.setSelection(Preferences.reasoningEfforts.indexOf(shared.getString("reasoningEffort")).coerceAtLeast(0))
         serviceTier.setSelection(Preferences.serviceTiers.indexOf(shared.optString("serviceTier", "")).coerceAtLeast(0))
         val words = shared.getJSONArray("dictionary")
-        dictionary.setText((0 until words.length()).joinToString("\n") { words.getString(it) })
+        dictionaryWords.clear()
+        dictionaryWords.addAll((0 until words.length()).map { words.getString(it) })
+        resetDictionaryEntry(); renderDictionary()
     }
     private fun sharedDraft(): JSONObject = prefs.shared.put("language", Preferences.languages[language.selectedItemPosition]).put("mode", Preferences.modes[mode.selectedItemPosition])
             .put("sarvamModel", Preferences.speechModels[speechModel.selectedItemPosition])
@@ -206,7 +224,50 @@ class SettingsActivity : Activity() {
             .put("prompt", prompt.text.toString()).put("processingEnabled", enabled.isChecked)
             .put("reasoningEffort", Preferences.reasoningEfforts[reasoningEffort.selectedItemPosition])
             .put("serviceTier", Preferences.serviceTiers[serviceTier.selectedItemPosition])
-            .put("dictionary", JSONArray(dictionary.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }))
+            .put("dictionary", JSONArray(dictionaryWords))
+    private fun resetDictionaryEntry() {
+        dictionaryEditingIndex = null; dictionaryEntry.setText("")
+        dictionaryAdd.text = "Add spelling"; dictionaryCancel.visibility = View.GONE
+    }
+    private fun saveDictionaryEntry() { attempt {
+        val word = dictionaryEntry.text.toString().trim()
+        require(word.isNotEmpty() && word.codePointCount(0, word.length) <= 120 && !word.contains('\n') && !word.contains('\r')) {
+            "Use one spelling or short phrase, up to 120 characters."
+        }
+        val editing = dictionaryEditingIndex
+        require(dictionaryWords.withIndex().none { it.index != editing && it.value.equals(word, ignoreCase = true) }) { "That spelling is already in your dictionary." }
+        require(editing != null || dictionaryWords.size < 500) { "Dictionary is full. Remove an entry before adding another." }
+        val next = dictionaryWords.toMutableList()
+        if (editing == null) next.add(word) else next[editing] = word
+        persistDictionary(next)
+        "Spelling saved."
+    } }
+    private fun persistDictionary(words: List<String>) {
+        val next = prefs.shared.put("dictionary", JSONArray(words))
+        Preferences.validate(next); prefs.shared = next
+        dictionaryWords.clear(); dictionaryWords.addAll(words)
+        resetDictionaryEntry(); renderDictionary()
+    }
+    private fun renderDictionary() {
+        dictionaryCount.text = "${dictionaryWords.size} / 500 entries · up to 120 characters each · saved automatically"
+        dictionaryList.removeAllViews()
+        if (dictionaryWords.isEmpty()) {
+            dictionaryList.addView(TextView(this).apply { text = "No spellings yet. Add names, places or terms that dictation often gets wrong."; setTextColor(Color.LTGRAY); setPadding(0, dp(16), 0, dp(16)) })
+        }
+        dictionaryWords.forEachIndexed { index, word ->
+            val row = LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
+            row.addView(TextView(this).apply { text = word; setTextColor(Color.WHITE); setTextIsSelectable(true) }, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(actionButton("Edit") {
+                dictionaryEditingIndex = index; dictionaryEntry.setText(word); dictionaryEntry.requestFocus()
+                dictionaryAdd.text = "Save spelling"; dictionaryCancel.visibility = View.VISIBLE
+                sectionScroll.smoothScrollTo(0, 0)
+            }, LinearLayout.LayoutParams(-2, dp(48)))
+            row.addView(actionButton("Remove") { attempt {
+                persistDictionary(dictionaryWords.filterIndexed { i, _ -> i != index }); "Spelling removed."
+            } }, LinearLayout.LayoutParams(-2, dp(48)))
+            dictionaryList.addView(row)
+        }
+    }
     private fun save() {
         val value = sharedDraft()
         Preferences.validate(value)
