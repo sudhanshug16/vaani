@@ -735,3 +735,18 @@ skipped). A new native-window regression test disables NSHostingView automatic
 sizing, then verifies actual native/content widths across connecting, listening,
 finishing, processing, idle and repeated state transitions. It also verifies
 height, bottom anchor and lack of keyboard/main-window focus.
+
+Patch tag v0.1.1 at cc01434 completed Release run 40758001227 successfully.
+Downloaded the CI arm64 ZIP and verified its published checksum and code
+signature. An isolated copy of that actual CI app was driven through the UI:
+idle measured 54 x 36, processing measured 138 x 36, and finishing the synthetic
+scenario returned to 54 x 36 at the same x/y. Screenshots showed the complete
+rounded active capsule with spinner, mic and dismiss controls, and a complete
+compact idle capsule. These synthetic scenarios did not record audio. The
+fixture apps exited through their done-file API afterward.
+
+Installed the unmodified v0.1.1 CI app directly into Air's /Applications/Vaani.app
+over SSH, backing up the prior app. Remote version/build readback was 0.1.1/1001
+and executable SHA256 matched the downloaded artifact. The existing GUI process
+was still running its previous executable; quit/reopen is required to load the
+fix. New real-microphone or paste acceptance is not claimed by these UI checks.
