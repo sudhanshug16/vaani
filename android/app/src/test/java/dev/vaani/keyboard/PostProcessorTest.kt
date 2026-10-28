@@ -86,12 +86,12 @@ class PostProcessorTest {
             reply(body = body)
         }
     }
-    @Test fun lunaDisablesReasoningWithoutChangingOtherModels() {
-        for (model in listOf("gpt-6-luna", "fixture-model")) {
-            action = { prefs -> PostProcessor.process("raw", prefs.put("model", model), "", OkHttpClient()) }
+    @Test fun selectedReasoningEffortIncludingExplicitProviderDefault() {
+        for (effort in Preferences.reasoningEfforts) {
+            action = { prefs -> PostProcessor.process("raw", prefs.put("model", "gpt-6-luna").put("reasoningEffort", effort), "", OkHttpClient()) }
             reply(body = """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Done."}]}]}""") { _, _, body ->
                 val request = JSONObject(body)
-                if (model == "gpt-6-luna") assertEquals("none", request.getJSONObject("reasoning").getString("effort"))
+                if (effort.isNotEmpty()) assertEquals(effort, request.getJSONObject("reasoning").getString("effort"))
                 else assertFalse(request.has("reasoning"))
             }
         }

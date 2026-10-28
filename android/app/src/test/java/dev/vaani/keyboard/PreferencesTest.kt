@@ -6,6 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PreferencesTest {
+    @Test fun reasoningEffortRoundTripAndLegacyLunaMigration() {
+        for (effort in Preferences.reasoningEfforts) {
+            assertEquals(effort, Preferences.canonical(Preferences.defaults().put("reasoningEffort", effort)).getString("reasoningEffort"))
+        }
+        val legacy = Preferences.defaults().put("model", "gpt-6-luna").apply { remove("reasoningEffort") }
+        assertEquals("none", Preferences.canonical(legacy).getString("reasoningEffort"))
+        assertEquals("", Preferences.canonical(legacy.put("reasoningEffort", "")).getString("reasoningEffort"))
+        for (invalid in listOf("unsupported", 42, JSONObject.NULL)) {
+            assertThrows(IllegalArgumentException::class.java) { Preferences.canonical(Preferences.defaults().put("reasoningEffort", invalid)) }
+        }
+    }
     @Test fun legacySettingsAndServiceTierRoundTrip() {
         val legacy = Preferences.defaults().apply { remove("serviceTier") }
         assertEquals("", Preferences.canonical(legacy).getString("serviceTier"))

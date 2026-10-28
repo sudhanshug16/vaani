@@ -3,6 +3,21 @@ import XCTest
 @testable import VaaniCore
 
 final class SharedSettingsFileTests: XCTestCase {
+    func testReasoningEffortRoundTripAndLegacyLunaMigration() throws {
+        for effort in SharedPreferences.reasoningEfforts {
+            var preferences = SharedPreferences(); preferences.reasoningEffort = effort
+            XCTAssertEqual(try SharedSettingsFile.decode(SharedSettingsFile.encode(preferences)), preferences)
+        }
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: SharedSettingsFile.encode(SharedPreferences())) as? [String: Any])
+        object.removeValue(forKey: "reasoningEffort"); object["model"] = "gpt-6-luna"
+        XCTAssertEqual(try SharedSettingsFile.decode(JSONSerialization.data(withJSONObject: object)).reasoningEffort, "none")
+        object["reasoningEffort"] = ""
+        XCTAssertEqual(try SharedSettingsFile.decode(JSONSerialization.data(withJSONObject: object)).reasoningEffort, "")
+        for invalid: Any in ["unsupported", 42, NSNull()] {
+            object["reasoningEffort"] = invalid
+            XCTAssertThrowsError(try SharedSettingsFile.decode(JSONSerialization.data(withJSONObject: object)))
+        }
+    }
     func testLegacySettingsAndServiceTierRoundTrip() throws {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: SharedSettingsFile.encode(SharedPreferences())) as? [String: Any])
         object.removeValue(forKey: "serviceTier")

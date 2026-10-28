@@ -521,6 +521,12 @@ struct SettingsView: View {
                     }
                 }
                 Text("Provider default leaves the tier unspecified. Fast / Priority may cost more; tier availability depends on your provider and model.").font(.caption).foregroundStyle(.secondary)
+                Picker("Reasoning effort", selection: $store.shared.reasoningEffort) {
+                    ForEach(Array(SharedPreferences.reasoningEfforts.enumerated()), id: \.offset) { index, effort in
+                        Text(SharedPreferences.reasoningEffortNames[index]).tag(effort)
+                    }
+                }
+                Text("None turns reasoning off. Supported efforts depend on the model; Provider default leaves the setting unspecified.").font(.caption).foregroundStyle(.secondary)
                 SecureField("API key (optional for local servers)", text: $processingKey).textFieldStyle(.roundedBorder)
                 HStack { Button("Save key") { saveKey(processingKey, account: "processing") }; Text(keyNotice).font(.caption).foregroundStyle(.secondary) }
                 Text("Accepts /v1 base URLs and full /responses URLs. HTTPS required except on localhost. Only text is sent to this provider.").font(.caption).foregroundStyle(.secondary)

@@ -9,12 +9,13 @@ public struct SharedPreferences: Codable, Equatable {
     public var endpoint = "https://api.openai.com/v1"
     public var model = ""
     public var serviceTier = ""
+    public var reasoningEffort = ""
     public var prompt = Self.defaultPrompt
     public var dictionary: [String] = []
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, language, mode, sarvamModel, processingEnabled, endpoint, model, serviceTier, prompt, dictionary
+        case schemaVersion, language, mode, sarvamModel, processingEnabled, endpoint, model, serviceTier, reasoningEffort, prompt, dictionary
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -26,10 +27,13 @@ public struct SharedPreferences: Codable, Equatable {
         endpoint = try values.decode(String.self, forKey: .endpoint)
         model = try values.decode(String.self, forKey: .model)
         serviceTier = values.contains(.serviceTier) ? try values.decode(String.self, forKey: .serviceTier) : ""
+        reasoningEffort = values.contains(.reasoningEffort) ? try values.decode(String.self, forKey: .reasoningEffort) : (model == "gpt-6-luna" ? "none" : "")
         prompt = try values.decode(String.self, forKey: .prompt)
         dictionary = try values.decode([String].self, forKey: .dictionary)
     }
 
+    public static let reasoningEfforts = ["", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    public static let reasoningEffortNames = ["Provider default", "None (off)", "Minimal", "Low", "Medium", "High", "Xhigh", "Max"]
     public static let serviceTiers = ["", "auto", "default", "priority", "flex"]
     public static func serviceTierName(_ tier: String) -> String {
         switch tier {
@@ -51,6 +55,7 @@ public struct SharedPreferences: Codable, Equatable {
 
     public func validated() throws -> Self {
         guard schemaVersion == 1 else { throw VaaniError.message("Unsupported settings version.") }
+        guard Self.reasoningEfforts.contains(reasoningEffort) else { throw VaaniError.message("Unsupported reasoning effort.") }
         guard Self.serviceTiers.contains(serviceTier) else { throw VaaniError.message("Unsupported service tier.") }
         guard Self.languages.contains(language), Self.modes.contains(mode),
               ["saaras:v3-realtime", "saaras:v4"].contains(sarvamModel) else {

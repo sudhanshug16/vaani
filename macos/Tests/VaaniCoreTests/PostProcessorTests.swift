@@ -80,13 +80,13 @@ final class PostProcessorTests: XCTestCase {
         }
         _ = try await PostProcessor.process("raw", preferences: changed, key: "", configuration: configuration)
     }
-    func testLunaDisablesReasoningWithoutChangingOtherModels() async throws {
-        for model in ["gpt-6-luna", "fixture-model"] {
-            var prefs = preferences; prefs.model = model
+    func testSelectedReasoningEffortIncludingExplicitProviderDefault() async throws {
+        for effort in SharedPreferences.reasoningEfforts {
+            var prefs = preferences; prefs.model = "gpt-6-luna"; prefs.reasoningEffort = effort
             CompletionFixture.respond = { request in
                 let json = try Self.requestJSON(request)
-                if model == "gpt-6-luna" {
-                    XCTAssertEqual(json["reasoning"] as? [String: String], ["effort": "none"])
+                if !effort.isEmpty {
+                    XCTAssertEqual(json["reasoning"] as? [String: String], ["effort": effort])
                 } else { XCTAssertNil(json["reasoning"]) }
                 return (200, Data(#"{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Done."}]}]}"#.utf8))
             }

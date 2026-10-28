@@ -27,7 +27,7 @@ public enum PostProcessor {
             "input": [["role": "developer", "content": instructions], ["role": "user", "content": text]],
             "prompt_cache_key": "vaani-polish-v1-" + digest.prefix(48), "store": false, "stream": false]
         if !preferences.serviceTier.isEmpty { body["service_tier"] = preferences.serviceTier }
-        if preferences.model == "gpt-6-luna" { body["reasoning"] = ["effort": "none"] }
+        if !preferences.reasoningEffort.isEmpty { body["reasoning"] = ["effort": preferences.reasoningEffort] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let session = URLSession(configuration: configuration, delegate: ProcessingNoRedirect(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }

@@ -42,6 +42,7 @@ class SettingsActivity : Activity() {
     private lateinit var mode: Spinner
     private lateinit var speechModel: Spinner
     private lateinit var serviceTier: Spinner
+    private lateinit var reasoningEffort: Spinner
     private lateinit var microphone: Spinner
     private lateinit var router: MicrophoneRouter
     private lateinit var routeSnapshot: MicrophoneSnapshot
@@ -124,6 +125,8 @@ class SettingsActivity : Activity() {
         section("Polish")
         enabled = Switch(this).apply { setText(R.string.polish_enabled); setTextColor(Color.WHITE) }; root.addView(enabled)
         endpoint = field("API base URL"); model = field("Processing model"); apiKey = field("Processing API key", true)
+        reasoningEffort = spinner("Reasoning effort", Preferences.reasoningEffortNames)
+        label("None turns reasoning off. Supported efforts depend on the model; Provider default leaves the setting unspecified.")
         serviceTier = spinner("Service tier", Preferences.serviceTierNames)
         label("Provider default leaves the tier unspecified. Fast / Priority may cost more; tier availability depends on your provider and model.")
         prompt = field("Post-processing prompt", multiline = true)
@@ -192,6 +195,7 @@ class SettingsActivity : Activity() {
         speechModel.setSelection(Preferences.speechModels.indexOf(shared.getString("sarvamModel")).coerceAtLeast(0))
         endpoint.setText(shared.getString("endpoint")); model.setText(shared.getString("model")); prompt.setText(shared.getString("prompt"))
         enabled.isChecked = shared.getBoolean("processingEnabled")
+        reasoningEffort.setSelection(Preferences.reasoningEfforts.indexOf(shared.getString("reasoningEffort")).coerceAtLeast(0))
         serviceTier.setSelection(Preferences.serviceTiers.indexOf(shared.optString("serviceTier", "")).coerceAtLeast(0))
         val words = shared.getJSONArray("dictionary")
         dictionary.setText((0 until words.length()).joinToString("\n") { words.getString(it) })
@@ -200,6 +204,7 @@ class SettingsActivity : Activity() {
             .put("sarvamModel", Preferences.speechModels[speechModel.selectedItemPosition])
             .put("endpoint", endpoint.text.toString().trim()).put("model", model.text.toString().trim())
             .put("prompt", prompt.text.toString()).put("processingEnabled", enabled.isChecked)
+            .put("reasoningEffort", Preferences.reasoningEfforts[reasoningEffort.selectedItemPosition])
             .put("serviceTier", Preferences.serviceTiers[serviceTier.selectedItemPosition])
             .put("dictionary", JSONArray(dictionary.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }))
     private fun save() {
