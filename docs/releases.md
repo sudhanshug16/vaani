@@ -53,13 +53,28 @@ ordinary debug builds stay unchanged; local release builds are unsigned.
 
 ## macOS signing
 
-Current downloadable Mac builds are ad-hoc signed and **not notarized**. There
-is no usable Developer ID Application identity configured for this project.
-macOS Gatekeeper may require manual approval, and microphone/Accessibility
-permissions can need renewal after updates. A stable Apple Developer ID and
-notarization are follow-up work; do not advertise these builds as notarized.
+Mac releases use a permanent self-signed code-signing certificate. They are
+**not Apple-notarized** and do not use a Developer ID certificate. Gatekeeper
+may still require manual approval. No root certificate is installed or trusted.
 
-`VAANI_SIGN_IDENTITY` selects a locally available signing identity. Release
-automation currently uses ad-hoc signing. `VAANI_ARCH` selects arm64 or x86_64;
-`VAANI_VERSION` and `VAANI_VERSION_CODE` stamp the packaged Info.plist without
-modifying the source plist.
+The designated requirement binds `dev.vaani.mac` to the certificate fingerprint,
+not the executable hash. Updating with the same certificate preserves that
+identity. Moving from an old ad-hoc build changes identity once and may require
+one final microphone/Accessibility approval. macOS permission retention still
+needs verification across real updates on each machine; matching signing
+requirements alone is not an end-to-end TCC test.
+
+CI requires `MACOS_SIGNING_P12_BASE64` and `MACOS_SIGNING_PASSWORD`. It imports
+that identity into an isolated temporary keychain, signs both architectures,
+and deletes the keychain afterward. Missing secrets fail the release; there is
+no silent ad-hoc fallback. Keep a private backup of the certificate and private
+key: replacing them changes the app identity again.
+
+The maintainer's local build uses the same identity from
+`~/Library/Application Support/Vaani/release-signing/macos-build.keychain-db`
+when present. Unlock that dedicated keychain before building if needed.
+`VAANI_SIGN_IDENTITY` and `VAANI_SIGN_KEYCHAIN` can explicitly select another
+identity/keychain. Other contributors without a configured identity can still
+build ad-hoc locally, but should not use those builds to update a stable signed
+installation. `VAANI_ARCH` selects arm64 or x86_64; `VAANI_VERSION` and
+`VAANI_VERSION_CODE` stamp the packaged Info.plist without changing the source.

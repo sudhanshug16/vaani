@@ -10,8 +10,8 @@ final class SpeechAudioProcessorTests: XCTestCase {
             return (Float(state >> 8) / Float(1 << 24) * 2 - 1) * 0.025
         }
     }
-    private func run(_ input: [Float], chunk: Int = 480) throws -> ([Int16], [Float]) {
-        let processor = try SpeechAudioProcessor()
+    private func run(_ input: [Float], chunk: Int = 480, mode: SpeechAudioProcessor.Mode = .enhanced) throws -> ([Int16], [Float]) {
+        let processor = try SpeechAudioProcessor(mode: mode)
         var output = [Int16](), levels = [Float]()
         let collect: (Data, Float) -> Void = { data, level in
             output.append(contentsOf: data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) })
@@ -28,6 +28,24 @@ final class SpeechAudioProcessorTests: XCTestCase {
         try input.withUnsafeBufferPointer { try processor.process($0, emit: collect) }
         XCTAssertEqual(output.count, count, "Finished audio must not be emitted twice")
         return (output, levels)
+    }
+    func testDefaultAudioPreservesQuietSpeechAndAmplitudeAcrossChunks() throws {
+        let input = (0..<48000).map { Float(sin(Double($0) * 2 * .pi * 440 / 48000)) * 0.02 }
+        let original = try SpeechAudioProcessor()
+        var pcm = [Int16]()
+        try input.withUnsafeBufferPointer { try original.process($0) { data, _ in
+            pcm.append(contentsOf: data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) })
+        } }
+        try original.finish { data, _ in
+            pcm.append(contentsOf: data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) })
+        }
+        let split = try run(input, chunk: 137, mode: .original)
+        XCTAssertEqual(pcm, split.0)
+        XCTAssertEqual(pcm.count, 16000)
+        let rms = sqrt(pcm.dropFirst(160).reduce(0.0) { $0 + pow(Double($1) / 32768, 2) } / Double(pcm.count - 160))
+        XCTAssertEqual(rms, 0.02 / sqrt(2), accuracy: 0.0002, "Default capture must neither gate quiet speech nor amplify it")
+        XCTAssertTrue(try run([], mode: .original).0.isEmpty)
+        XCTAssertEqual(try run([0], mode: .original).0.count, 160)
     }
     func testStationaryNoiseIsSuppressedThroughProductionPipeline() throws {
         let input = noise(count: 96000)

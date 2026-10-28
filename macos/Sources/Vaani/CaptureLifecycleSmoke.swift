@@ -14,26 +14,28 @@ enum CaptureLifecycleSmoke {
             return (Float(seed >> 8) / Float(1 << 24) * 2 - 1) * 0.025
         }
         let start = Date()
-        for cycle in 1...10 {
-            let processor = try SpeechAudioProcessor()
-            var bytes = 0, invalid = false
-            let receive: (Data, Float) -> Void = { data, level in
-                bytes += data.count
-                invalid = invalid || !level.isFinite || !(0...1).contains(level) || data.count % 2 != 0
-                data.withUnsafeBytes { buffer in
-                    if buffer.bindMemory(to: Int16.self).contains(where: { abs(Int($0)) > 31130 }) { invalid = true }
+        for mode in [SpeechAudioProcessor.Mode.original, .enhanced] {
+            for cycle in 1...10 {
+                let processor = try SpeechAudioProcessor(mode: mode)
+                var bytes = 0, invalid = false
+                let receive: (Data, Float) -> Void = { data, level in
+                    bytes += data.count
+                    invalid = invalid || !level.isFinite || !(0...1).contains(level) || data.count % 2 != 0
+                    data.withUnsafeBytes { buffer in
+                        if buffer.bindMemory(to: Int16.self).contains(where: { abs(Int($0)) > 31130 }) { invalid = true }
+                    }
                 }
-            }
-            try noise.withUnsafeBufferPointer { buffer in
-                for start in stride(from: 0, to: buffer.count, by: 480) {
-                    try processor.process(UnsafeBufferPointer(rebasing: buffer[start..<start + 480]), emit: receive)
+                try noise.withUnsafeBufferPointer { buffer in
+                    for start in stride(from: 0, to: buffer.count, by: 480) {
+                        try processor.process(UnsafeBufferPointer(rebasing: buffer[start..<start + 480]), emit: receive)
+                    }
                 }
+                try processor.finish(emit: receive)
+                guard bytes == (mode == .original ? 32000 : 32640), !invalid else { throw VaaniError.message("Invalid speech PCM in processing cycle \(cycle).") }
+                print("Processing \(mode) cycle \(cycle): \(bytes) PCM bytes; finalization passed.")
             }
-            try processor.finish(emit: receive)
-            guard bytes == 32640, !invalid else { throw VaaniError.message("Invalid speech PCM in processing cycle \(cycle).") }
-            print("Processing cycle \(cycle): \(bytes) PCM bytes; model and finalization passed.")
         }
-        print("10 seconds of synthetic audio processed in \(Date().timeIntervalSince(start)) seconds. No microphone, saved audio, keys or network.")
+        print("20 seconds of synthetic audio processed in \(Date().timeIntervalSince(start)) seconds. No microphone, saved audio, keys or network.")
     }
     static func run() throws {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {

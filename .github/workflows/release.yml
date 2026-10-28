@@ -33,6 +33,11 @@ jobs:
       - uses: actions/checkout@v4
       - if: matrix.arch == 'arm64'
         run: swift test --package-path macos
+      - name: Restore permanent Mac signing identity
+        env:
+          MACOS_SIGNING_P12_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
+          MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+        run: python3 scripts/restore-macos-signing.py
       - run: ./scripts/build-macos.sh
       - name: Package app
         run: |
@@ -44,6 +49,12 @@ jobs:
           name: release-macos-${{ matrix.arch }}
           path: out/*.zip
           if-no-files-found: error
+      - name: Remove temporary Mac signing keychain
+        if: always()
+        run: |
+          if [[ -n "${VAANI_SIGN_KEYCHAIN:-}" && -f "$VAANI_SIGN_KEYCHAIN" ]]; then
+            security delete-keychain "$VAANI_SIGN_KEYCHAIN"
+          fi
   android:
     needs: version
     runs-on: ubuntu-latest
@@ -118,7 +129,7 @@ jobs:
           cat > /tmp/vaani-release-notes.md <<'NOTES'
           Early personal-use pre-release.
 
-          - macOS: choose arm64 for Apple silicon or x86_64 for Intel. Unzip and move Vaani.app to Applications. These builds are ad-hoc signed, not Apple-notarized; macOS may require approval. Recheck microphone and Accessibility permissions after updating.
+          - macOS: choose arm64 for Apple silicon or x86_64 for Intel. Unzip and move Vaani.app to Applications. These builds use a permanent self-signed identity, not Apple notarization. Migration from old ad-hoc builds requires one new microphone/Accessibility approval; subsequent builds retain the signing requirement. Gatekeeper may still require manual approval.
           - Android: install the release APK. Updates between release APKs retain settings. Existing debug builds use a different signing key: export shared settings first, uninstall the debug app, install this APK and re-enter device-local API keys. Dictionary and other shared settings can be imported afterward.
           - SHA256SUMS verifies downloaded assets. API keys, recordings and personal settings are not included.
           NOTES

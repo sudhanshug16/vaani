@@ -20,5 +20,17 @@ if [[ -n "${VAANI_VERSION:-}" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VAANI_VERSION" "$app_path/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VAANI_VERSION_CODE:?VAANI_VERSION_CODE is required}" "$app_path/Contents/Info.plist"
 fi
-codesign --force --sign "${VAANI_SIGN_IDENTITY:--}" --identifier dev.vaani.mac "$app_path"
+# Prefer the maintainer's permanent local identity. Never silently fall back to
+# ad-hoc when this keychain exists: failure must stop deployment.
+local_keychain="$HOME/Library/Application Support/Vaani/release-signing/macos-build.keychain-db"
+if [[ -z "${VAANI_SIGN_IDENTITY:-}" && -f "$local_keychain" ]]; then
+  VAANI_SIGN_IDENTITY='Vaani Release Signing'
+  VAANI_SIGN_KEYCHAIN="$local_keychain"
+fi
+sign_args=(--force --sign "${VAANI_SIGN_IDENTITY:--}" --identifier dev.vaani.mac)
+if [[ -n "${VAANI_SIGN_KEYCHAIN:-}" ]]; then
+  sign_args+=(--keychain "$VAANI_SIGN_KEYCHAIN")
+fi
+codesign "${sign_args[@]}" "$app_path"
+codesign --verify --deep --strict "$app_path"
 printf '%s\n' "$app_path"

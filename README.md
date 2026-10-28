@@ -28,7 +28,7 @@ The floating panel is only a compact draggable pill: no expanded card, app name 
 
 Choose and remember microphones/profiles in Settings → Microphones. Process-private audio-engine aggregates are excluded from microphone choices; public user-created aggregates and virtual microphones remain available. Automatic setup matching follows monitors and USB devices; OS device notifications coalesce brief hub/monitor changes before choosing a new setup. Input-route or audio-format changes during recording stop capture and preserve text.
 
-Mac capture uses bundled [RNNoise](https://github.com/xiph/rnnoise) speech noise suppression locally before transcription, followed by speech-aware gain limited to 4× and peak protection. The waveform uses a smoothed level from the processed audio. The roughly 5 MB model needs no download at runtime; microphone selection and system input volume are unchanged. This reduces background noise rather than isolating one speaker from other voices.
+Mac capture resamples the selected microphone to mono 16 kHz PCM16 without automatic gain or noise suppression. The waveform is smoothed for display only. The bundled RNNoise and gain pipeline remains experimental and disabled in normal capture after reported transcription regressions; synthetic noise reduction is not evidence of Hinglish recognition quality.
 
 For Home and Office setups with identical hardware, select a mic, enter a name, and choose **Save as separate profile**. Switch profiles from Settings → Microphones. A manual profile stays selected across restarts and hardware changes until you choose **Automatic**. A missing preferred mic always needs a new choice.
 
@@ -62,9 +62,9 @@ build/Vaani.app/Contents/MacOS/Vaani --check-sarvam
 
 This contacts Sarvam with the saved key but does not start the microphone.
 
-The build is locally ad-hoc signed, not notarized. Permissions can need regranting after rebuilding. No login item is installed.
+Mac releases use a permanent self-signed identity, not Apple notarization. Migrating from an old ad-hoc build may need one final permission approval. Subsequent updates retain the signing requirement; actual OS permission retention still needs verification. No login item is installed.
 
-For development builds, `VAANI_SIGN_IDENTITY="<your existing code-signing identity>" ./scripts/build-macos.sh` uses a stable signing identity. The default is ad-hoc signing, which can trigger Keychain reauthorization after rebuilding. Signing/notarization and the daily Mac insertion loop still require validation.
+Local maintainer builds use the same permanent signing keychain when available. Other development builds default to ad-hoc signing unless `VAANI_SIGN_IDENTITY` (and optionally `VAANI_SIGN_KEYCHAIN`) is set. Ad-hoc updates can reset permissions. See [release signing](docs/releases.md#macos-signing).
 
 ## Android keyboard
 
