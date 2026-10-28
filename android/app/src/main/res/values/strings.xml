@@ -17,4 +17,15 @@
     <string name="automatic_profile">Automatic · connected hardware</string>
     <string name="microphone_summary">%1$s · %2$s</string>
     <string name="delete_failed">Editor could not delete text.</string>
+    <string name="voice_settings">Vaani settings</string>
+    <string name="switch_keyboard">Switch keyboard</string>
+    <string name="insert_saved_text">Insert saved text</string>
+    <string name="cancel_dictation">Cancel</string>
+    <string name="voice_unavailable">Voice unavailable</string>
+    <string name="tap_to_dictate">Tap to dictate</string>
+    <string name="tap_to_finish">Tap to finish</string>
+    <string name="tap_anywhere_start">Tap anywhere to start</string>
+    <string name="tap_anywhere_finish">Listening · tap anywhere to finish</string>
+    <string name="cancel_available">You can cancel below</string>
+    <string name="choose_microphone_in_settings">Choose a microphone in Settings to continue.</string>
 </resources>

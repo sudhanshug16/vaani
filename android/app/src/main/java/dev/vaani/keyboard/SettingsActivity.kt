@@ -152,7 +152,7 @@ class SettingsActivity : Activity() {
         root = shell
         button("Save settings & keys") { attempt { save(); "Saved. Keys stay on this device." } }
         attempt { load(); "Keys stay on this device." }
-        selectSection(savedInstanceState?.getString("section") ?: "Voice")
+        selectSection(savedInstanceState?.getString("section") ?: intent.getStringExtra("section")?.takeIf { it in sections } ?: "Voice")
     }
     private fun section(name: String) {
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }

@@ -79,3 +79,19 @@ The physical Realme and Mac UI completed Pair, Use Mac, Send Android, Discard, a
 ## Android settings navigation
 
 The native Activity groups controls into five sections matching the Mac settings vocabulary. Section views remain instantiated while hidden, preserving unsaved field values across navigation. A fixed Save action commits the complete shared draft and keys from any section; selecting a tab never auto-saves. Microphone preference actions remain explicit. Per-section scroll offsets are in memory, and only the selected section is restored through Activity saved state; drafts/credentials are not manually serialized into that state. Physical Realme acceptance covered cross-section draft saving and exact settings restoration.
+
+
+## Voice-only Android input surface
+
+The IME renders a native tappable surface, with no alphabet/symbol keyboard or
+upstream keyboard engine. Settings occupies a corner; keyboard switching remains
+available even in protected fields. A surface tap starts in Ready and finishes
+only once Listening; connecting/finalizing ignore additional surface taps while
+Cancel remains usable. Finish still commits via DictationDelivery, retaining
+explicit recovery for failed/unfinalized results. Settings navigation cancels
+capture and uses an allowlisted section extra to open Microphones when needed.
+
+The input view adds system-bar and display-cutout padding, excluding IME insets
+(which describe the keyboard itself). Controls have minimum 48-dp targets, text
+can grow the layout, landscape uses a shorter center, and fullscreen editing is
+disabled. Password restrictions and input/window cancellation stay in place.

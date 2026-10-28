@@ -528,3 +528,25 @@ Settings window with the exact pinned error text. Fixture was ended through its
 done sentinel. Updated release installed directly at Air /Applications/Vaani.app;
 strict deep codesign passed and executable SHA-256 matched local release:
 399a3031f85570ffff84f268ba16ac1830c0c9e5c066750270e45962db6f5313.
+
+
+### Voice-only Android surface (2026-10-28)
+
+Removed traditional typing rows, shift/symbol actions and the inline microphone
+picker from the IME. Existing speech, mic routing/preferences, polishing and
+recovery paths are reused. No keyboard fork or new runtime dependency was added.
+Settings opens Voice, or the Microphones section if selection is needed.
+
+Build, 45 JVM tests and Android lint passed. Physical Android 13 checks showed:
+blank left surface starts listening, blank right surface finishes and inserts
+recognized text; Cancel returns to Ready with the empty editor unchanged; the
+corner gear opens Voice settings; password fields disable dictation while the
+keyboard-switch control still switches to the other installed keyboard. Restored
+Vaani through the system input-method picker afterward. Acoustic recognition
+included ambient words; this is insertion/lifecycle proof, not clean accuracy
+proof. Portrait screenshots show controls clear of the system navigation region.
+Landscape, gesture navigation, large fonts and manual TalkBack remain unverified.
+
+The device screenshot connector failed; agent-device screenshots and snapshots
+provided native UI verification. Screenshot artifacts are local build/test
+artifacts and are not committed.

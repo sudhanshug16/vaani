@@ -26,15 +26,44 @@ final class PrivateAggregateTests: XCTestCase {
         guard status == noErr else { throw XCTSkip("HAL aggregate creation unavailable (\(status))") }
         return device
     }
+    // HAL publishes the device and its input streams asynchronously after
+    // creation. Check raw HAL state so the private-device assertion cannot pass
+    // merely because the aggregate has not become an input yet.
+    private func waitForInput(_ device: AudioDeviceID) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive,
+                mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var alive: UInt32 = 0; var size = UInt32(MemoryLayout<UInt32>.size)
+            if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &alive) == noErr, alive != 0 {
+                address.mSelector = kAudioDevicePropertyStreamConfiguration
+                address.mScope = kAudioDevicePropertyScopeInput
+                var bytes: UInt32 = 0
+                if AudioObjectGetPropertyDataSize(device, &address, 0, nil, &bytes) == noErr,
+                   bytes >= MemoryLayout<AudioBufferList>.size {
+                    let memory = UnsafeMutableRawPointer.allocate(byteCount: Int(bytes), alignment: MemoryLayout<AudioBufferList>.alignment)
+                    defer { memory.deallocate() }
+                    if AudioObjectGetPropertyData(device, &address, 0, nil, &bytes, memory) == noErr {
+                        let buffers = UnsafeMutableAudioBufferListPointer(memory.assumingMemoryBound(to: AudioBufferList.self))
+                        if buffers.contains(where: { $0.mNumberChannels > 0 }) { return true }
+                    }
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return false
+    }
     func testPrivateProcessAggregateIsNotAUserMicrophone() throws {
         let device = try makeAggregate(isPrivate: true)
         defer { AudioHardwareDestroyAggregateDevice(device) }
+        guard waitForInput(device) else { return XCTFail("HAL aggregate did not expose a live input within 5 seconds") }
         XCTAssertFalse(DeviceInventory.microphones().contains { $0.deviceID == device },
                        "Private engine aggregates must not turn a single microphone setup into an ambiguous choice")
     }
     func testPublicUserAggregateRemainsSelectable() throws {
         let device = try makeAggregate(isPrivate: false)
         defer { AudioHardwareDestroyAggregateDevice(device) }
+        guard waitForInput(device) else { return XCTFail("HAL aggregate did not expose a live input within 5 seconds") }
         XCTAssertTrue(DeviceInventory.microphones().contains { $0.deviceID == device },
                       "User-created public aggregates must remain available")
     }

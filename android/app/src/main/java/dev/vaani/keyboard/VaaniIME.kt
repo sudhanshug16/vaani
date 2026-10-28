@@ -1,113 +1,187 @@
 package dev.vaani.keyboard
 
+import android.content.Intent
+import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.RippleDrawable
+import android.graphics.drawable.ColorDrawable
+import android.inputmethodservice.InputMethodService
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.inputmethodservice.InputMethodService
 import android.text.InputType
+import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.ProgressBar
+import android.widget.TextView
 
+/** A voice input surface. Ordinary typing stays with the user's other keyboard. */
 class VaaniIME : InputMethodService() {
+    private enum class Phase { READY, CONNECTING, LISTENING, FINISHING }
+    private var phase = Phase.READY
     private var session: DictationSession? = null
     private var generation = 0
     private val delivery = DictationDelivery()
-    private var shifted = false
-    private var symbols = false
     private var protectedField = false
+    private var needsMicrophone = false
+    private lateinit var surface: LinearLayout
+    private lateinit var headline: TextView
+    private lateinit var voiceIcon: ImageView
     private lateinit var status: TextView
     private lateinit var levelMeter: ProgressBar
-    private lateinit var dictate: Button
+    private lateinit var cancelButton: Button
     private lateinit var insert: Button
-    private lateinit var letters: LinearLayout
-    private lateinit var microphonePanel: LinearLayout
-    private lateinit var micButton: Button
-    private lateinit var microphoneScroll: android.widget.ScrollView
+    private lateinit var settings: ImageButton
     private lateinit var router: MicrophoneRouter
+    private val accent = Color.rgb(255, 156, 87)
     private val deviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) { refreshMicrophones() }
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) { refreshMicrophones() }
     }
     override fun onCreate() {
-        super.onCreate(); router = MicrophoneRouter(this)
+        super.onCreate()
+        router = MicrophoneRouter(this)
         getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
     }
-    private val accent = Color.rgb(255, 156, 87)
+    override fun onEvaluateFullscreenMode() = false
     override fun onCreateInputView(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(8), dp(10), dp(8)); setBackgroundColor(Color.rgb(20, 21, 25))
-        }
-        status = TextView(this).apply { setTextColor(accent); textSize = 12f; visibility = View.GONE; accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
-        root.addView(status)
-        levelMeter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100; progress = 0; visibility = View.GONE
-            contentDescription = getString(R.string.microphone_level)
-            progressTintList = android.content.res.ColorStateList.valueOf(accent)
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(52, 54, 62))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_NONE
-        }
-        root.addView(levelMeter, LinearLayout.LayoutParams(-1, dp(4)))
-        micButton = button("Mic") {
-            if (session == null) {
-                microphoneScroll.visibility = if (microphoneScroll.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                refreshMicrophones()
+        val surfaceColor = Color.rgb(20, 21, 25)
+        surface = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            this.background = RippleDrawable(ColorStateList.valueOf(Color.rgb(52, 54, 62)), ColorDrawable(surfaceColor), null)
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            setOnClickListener { toggle() }
+            setOnApplyWindowInsetsListener { view, insets ->
+                // System navigation/cutout only: IME insets describe this entire
+                // keyboard and must never be added again as bottom padding.
+                if (Build.VERSION.SDK_INT >= 30) {
+                    val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                    view.setPadding(dp(12) + safe.left, dp(8) + safe.top, dp(12) + safe.right, dp(8) + safe.bottom)
+                } else {
+                    view.setPadding(dp(12) + insets.systemWindowInsetLeft, dp(8), dp(12) + insets.systemWindowInsetRight, dp(8) + insets.systemWindowInsetBottom)
+                }
+                insets
             }
         }
-        // Microphones stay behind a compact action, rather than a full summary row.
-        microphonePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        microphoneScroll = android.widget.ScrollView(this).apply { addView(microphonePanel); visibility = View.GONE }
-        root.addView(microphoneScroll, LinearLayout.LayoutParams(-1, dp(144)))
-        val actions = LinearLayout(this)
-        dictate = button("Dictate") { if (session == null) startDictation() else { session?.finish(); dictate.isEnabled = false; resetLevel(); showStatus(getString(R.string.finishing)) } }
-        insert = button("Insert saved text") {
+        val header = LinearLayout(this).apply { gravity = Gravity.END }
+        settings = ImageButton(this).apply {
+            setImageResource(R.drawable.ic_voice_settings)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            imageTintList = ColorStateList.valueOf(Color.rgb(176, 178, 188))
+            contentDescription = getString(R.string.voice_settings)
+            background = null
+            setOnClickListener {
+                cancel()
+                requestHideSelf(0)
+                startActivity(Intent(this@VaaniIME, SettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra("section", if (needsMicrophone) "Microphones" else "Voice"))
+            }
+        }
+        header.addView(settings, LinearLayout.LayoutParams(dp(48), dp(48)))
+        surface.addView(header, LinearLayout.LayoutParams(-1, dp(48)))
+        val compact = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val center = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            minimumHeight = dp(if (compact) 100 else 148)
+            setPadding(dp(20), dp(8), dp(20), dp(12))
+        }
+        voiceIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_voice_surface)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        center.addView(voiceIcon, LinearLayout.LayoutParams(dp(if (compact) 32 else 44), dp(if (compact) 32 else 44)))
+        headline = TextView(this).apply {
+            textSize = 20f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(4))
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        center.addView(headline)
+        status = TextView(this).apply {
+            textSize = 13f; setTextColor(Color.rgb(176, 178, 188)); gravity = Gravity.CENTER
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        center.addView(status, LinearLayout.LayoutParams(-1, -2))
+        levelMeter = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100; progress = 0; visibility = View.INVISIBLE
+            contentDescription = getString(R.string.microphone_level)
+            progressTintList = ColorStateList.valueOf(accent)
+            progressBackgroundTintList = ColorStateList.valueOf(Color.rgb(52, 54, 62))
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        center.addView(levelMeter, LinearLayout.LayoutParams(dp(96), dp(3)).apply { topMargin = dp(12) })
+        surface.addView(center, LinearLayout.LayoutParams(-1, -2))
+        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        controls.addView(button("⌨") {
+            cancel()
+            if (!switchToNextInputMethod(false)) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
+        }.apply { contentDescription = getString(R.string.switch_keyboard) }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        controls.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        insert = button(getString(R.string.insert_saved_text)) {
             val outcome = delivery.insert(protectedField) { currentInputConnection?.commitText(it, 1) == true }
             showStatus(if (outcome == DictationDelivery.Outcome.FAILED) getString(R.string.insert_failed) else null)
             insert.visibility = if (delivery.pending.isBlank()) View.GONE else View.VISIBLE
         }.apply { visibility = View.GONE }
-        listOf(dictate, button("Cancel") { cancel() }, micButton,
-            button("Next ⌁") { switchToNextInputMethod(false) }).forEach { actions.addView(it, LinearLayout.LayoutParams(0, dp(44), 1f)) }
-        root.addView(actions)
-        root.addView(insert, LinearLayout.LayoutParams(-1, dp(40)))
-        letters = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(letters); renderLetters()
-        dictate.isEnabled = !protectedField
-        if (protectedField) showStatus(getString(R.string.password_voice_off))
+        controls.addView(insert, LinearLayout.LayoutParams(-2, dp(48)))
+        cancelButton = button(getString(R.string.cancel_dictation)) { cancel() }.apply { visibility = View.GONE }
+        controls.addView(cancelButton, LinearLayout.LayoutParams(-2, dp(48)))
+        surface.addView(controls, LinearLayout.LayoutParams(-1, dp(48)))
+        render()
         refreshMicrophones()
-        return root
+        surface.requestApplyInsets()
+        return surface
+    }
+    private fun toggle() {
+        when (phase) {
+            Phase.READY -> startDictation()
+            Phase.LISTENING -> { phase = Phase.FINISHING; render(); session?.finish() }
+            else -> Unit // Cancel remains usable during connection/polishing.
+        }
     }
     private fun startDictation() {
         if (protectedField) { showStatus(getString(R.string.password_voice_off)); return }
         val snapshot = try { router.snapshot() } catch (error: Exception) { showStatus(error.message); return }
         val selected = snapshot.decision as? MicrophoneDecision.Selected
+        needsMicrophone = selected == null
         if (selected == null) {
-            microphoneScroll.visibility = View.VISIBLE; refreshMicrophones()
             showStatus(when (snapshot.decision) {
                 MicrophoneDecision.Unavailable -> getString(R.string.no_microphone)
                 MicrophoneDecision.Missing -> getString(R.string.preferred_microphone_missing)
                 MicrophoneDecision.AmbiguousIdentity -> getString(R.string.ambiguous_microphone)
-                else -> getString(R.string.choose_microphone)
+                else -> getString(R.string.choose_microphone_in_settings)
             })
             return
         }
-        microphoneScroll.visibility = View.GONE; micButton.isEnabled = false
-        delivery.clear(); insert.visibility = View.GONE; dictate.text = getString(R.string.finish); showStatus(getString(R.string.connecting))
+        delivery.clear(); insert.visibility = View.GONE
+        phase = Phase.CONNECTING; render()
         val token = ++generation
         val next = DictationSession(this, selected.microphone,
             onState = { text -> mainExecutor.execute { if (generation == token) {
-                showStatus(if (text.startsWith("Listening")) null else text)
-                if (text.startsWith("Listening")) levelMeter.visibility = View.VISIBLE else resetLevel()
-            } } },
-            onText = { _ -> },
+                if (phase == Phase.FINISHING && !text.startsWith("Finishing") && !text.startsWith("Polishing")) return@execute
+                if (phase != Phase.FINISHING) {
+                    phase = if (text.startsWith("Listening")) Phase.LISTENING else if (text == getString(R.string.finishing) || text.startsWith("Polishing")) Phase.FINISHING else Phase.CONNECTING
+                }
+                render()
+                if (phase != Phase.LISTENING) showStatus(text)
+            } } }, onText = { _ -> },
             onResult = { text, error -> mainExecutor.execute {
                 if (generation == token) {
                     val outcome = delivery.complete(text, error, protectedField) { currentInputConnection?.commitText(it, 1) == true }
+                    session = null; phase = Phase.READY; render()
                     showStatus(when (outcome) {
                         DictationDelivery.Outcome.INSERTED -> null
                         DictationDelivery.Outcome.EMPTY -> error ?: getString(R.string.no_speech_detected)
@@ -115,28 +189,43 @@ class VaaniIME : InputMethodService() {
                         DictationDelivery.Outcome.FAILED -> getString(R.string.insert_failed)
                         DictationDelivery.Outcome.PROTECTED -> getString(R.string.password_voice_off)
                     })
-                    resetLevel()
-                    dictate.text = getString(R.string.dictate); dictate.isEnabled = !protectedField
                     insert.visibility = if (delivery.pending.isBlank()) View.GONE else View.VISIBLE
-                    session = null; micButton.isEnabled = true; refreshMicrophones()
+                    refreshMicrophones()
                 }
             } }, onLevel = { level -> mainExecutor.execute { if (generation == token) levelMeter.progress = level } })
         session = next; next.start()
     }
-    private fun cancel() {
-        generation++; session?.cancel(); session = null; delivery.clear()
-        if (::dictate.isInitialized) {
-            resetLevel()
-            dictate.text = getString(R.string.dictate); dictate.isEnabled = !protectedField; insert.visibility = View.GONE; micButton.isEnabled = true
-            showStatus(if (protectedField) getString(R.string.password_voice_off) else null)
+    private fun render() {
+        if (!::surface.isInitialized) return
+        val title = when {
+            protectedField -> getString(R.string.voice_unavailable)
+            phase == Phase.CONNECTING -> getString(R.string.connecting)
+            phase == Phase.LISTENING -> getString(R.string.tap_to_finish)
+            phase == Phase.FINISHING -> getString(R.string.finishing)
+            else -> getString(R.string.tap_to_dictate)
         }
+        voiceIcon.setImageResource(if (phase == Phase.LISTENING) R.drawable.ic_voice_stop else R.drawable.ic_voice_surface)
+        voiceIcon.imageTintList = ColorStateList.valueOf(if (protectedField) Color.rgb(96, 98, 108) else accent)
+        headline.text = title
+        surface.contentDescription = title
+        surface.isEnabled = !protectedField && phase in listOf(Phase.READY, Phase.LISTENING)
+        cancelButton.visibility = if (phase != Phase.READY) View.VISIBLE else View.GONE
+        settings.isEnabled = phase == Phase.READY
+        levelMeter.visibility = if (phase == Phase.LISTENING) View.VISIBLE else View.INVISIBLE
+        if (phase != Phase.LISTENING) levelMeter.progress = 0
+        showStatus(if (protectedField) getString(R.string.password_voice_off) else null)
+    }
+    private fun cancel() {
+        generation++; session?.cancel(); session = null; delivery.clear(); phase = Phase.READY
+        if (::surface.isInitialized) { insert.visibility = View.GONE; render() }
     }
     private fun showStatus(message: String?) {
-        status.text = message.orEmpty()
-        status.visibility = if (message.isNullOrBlank()) View.GONE else View.VISIBLE
-    }
-    private fun resetLevel() {
-        if (::levelMeter.isInitialized) { levelMeter.progress = 0; levelMeter.visibility = View.GONE }
+        status.text = message ?: when (phase) {
+            Phase.READY -> getString(R.string.tap_anywhere_start)
+            Phase.LISTENING -> getString(R.string.tap_anywhere_finish)
+            else -> getString(R.string.cancel_available)
+        }
+        status.setTextColor(if (message.isNullOrBlank()) Color.rgb(176, 178, 188) else accent)
     }
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting); cancel()
@@ -146,7 +235,7 @@ class VaaniIME : InputMethodService() {
         protectedField = type == InputType.TYPE_NULL ||
             (category == InputType.TYPE_CLASS_TEXT && variation in listOf(InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) ||
             (category == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-        if (::dictate.isInitialized) { dictate.isEnabled = !protectedField; showStatus(if (protectedField) getString(R.string.password_voice_off) else null) }
+        render()
     }
     override fun onFinishInput() { cancel(); super.onFinishInput() }
     override fun onWindowHidden() { cancel(); super.onWindowHidden() }
@@ -155,60 +244,18 @@ class VaaniIME : InputMethodService() {
     }
     override fun onWindowShown() { super.onWindowShown(); refreshMicrophones() }
     private fun refreshMicrophones() {
-        if (!::microphonePanel.isInitialized || session != null) return
+        if (!::settings.isInitialized || session != null) return
         try {
             val snapshot = router.snapshot()
             val selected = (snapshot.decision as? MicrophoneDecision.Selected)?.microphone
-            micButton.contentDescription = getString(R.string.microphone_summary, snapshot.profileName, selected?.label ?: getString(R.string.choose_microphone))
-            microphonePanel.removeAllViews()
-            if (snapshot.inputs.isEmpty()) microphonePanel.addView(TextView(this).apply { setText(R.string.no_microphone); setTextColor(accent) })
-            snapshot.inputs.forEach { mic ->
-                microphonePanel.addView(button((if (selected?.uid == mic.uid) "✓ " else "") + mic.label) {
-                    try {
-                        router.remember(snapshot, mic.uid); microphoneScroll.visibility = View.GONE
-                        showStatus(getString(R.string.microphone_saved)); refreshMicrophones()
-                    } catch (error: Exception) { showStatus(error.message); refreshMicrophones() }
-                })
-            }
-            microphonePanel.addView(button(getString(R.string.automatic_profile)) { selectProfile(null) })
-            router.profiles().forEach { profile ->
-                microphonePanel.addView(button(profile.name) { selectProfile(profile.id) })
-            }
+            needsMicrophone = selected == null
+            settings.contentDescription = getString(R.string.voice_settings) + " · " + getString(R.string.microphone_summary, snapshot.profileName, selected?.label ?: getString(R.string.choose_microphone))
         } catch (error: Exception) { showStatus(error.message) }
     }
-    private fun selectProfile(id: String?) {
-        try { router.useProfile(id); refreshMicrophones() }
-        catch (error: Exception) { showStatus(error.message) }
-    }
-    private fun renderLetters() {
-        letters.removeAllViews()
-        (if (symbols) listOf("1234567890", "@#₹%&*-+=", "()!?/:,\"") else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")).forEach { row ->
-            val line = LinearLayout(this)
-            row.forEach { character ->
-                val text = if (shifted) character.uppercase() else character.toString()
-                line.addView(button(text) { currentInputConnection?.commitText(text, 1); if (shifted) { shifted = false; renderLetters() } }, LinearLayout.LayoutParams(0, dp(43), 1f))
-            }
-            letters.addView(line)
-        }
-        val bottom = LinearLayout(this)
-        listOf(button(if (symbols) "ABC" else "123") { symbols = !symbols; renderLetters() },
-            button("⇧") { shifted = !shifted; renderLetters() }, button(".") { currentInputConnection?.commitText(".", 1) },
-            button("space") { currentInputConnection?.commitText(" ", 1) }, button("⌫") {
-                if (currentInputConnection?.let(EditorActions::backspace) == false) showStatus(getString(R.string.delete_failed))
-            }, button("↵") { if (!sendDefaultEditorAction(true)) currentInputConnection?.commitText("\n", 1) }).forEachIndexed { index, view ->
-            bottom.addView(view, LinearLayout.LayoutParams(0, dp(43), if (index == 3) 3f else 1f))
-        }
-        letters.addView(bottom)
-    }
     private fun button(label: String, action: () -> Unit) = Button(this).apply {
-        text = label; isAllCaps = false; textSize = 13f; minWidth = 0; minimumWidth = 0
-        backgroundTintList = android.content.res.ColorStateList(
-            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(Color.rgb(34, 35, 40), Color.rgb(52, 54, 62)))
-        setTextColor(android.content.res.ColorStateList(
-            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(Color.rgb(120, 122, 130), Color.WHITE)))
-        setPadding(0, 0, 0, 0); setOnClickListener { action() }
+        text = label; isAllCaps = false; textSize = 14f; minWidth = dp(48); minimumWidth = dp(48)
+        background = null; setTextColor(accent); setPadding(dp(12), 0, dp(12), 0)
+        setOnClickListener { action() }
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
