@@ -53,10 +53,28 @@ final class PrivateAggregateTests: XCTestCase {
         } while Date() < deadline
         return false
     }
+    private func waitUntil(_ predicate: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            if predicate() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return predicate()
+    }
+    private func publishedDevices() -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return [] }
+        var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices) == noErr else { return [] }
+        return devices
+    }
     func testPrivateProcessAggregateIsNotAUserMicrophone() throws {
         let device = try makeAggregate(isPrivate: true)
         defer { AudioHardwareDestroyAggregateDevice(device) }
         guard waitForInput(device) else { return XCTFail("HAL aggregate did not expose a live input within 5 seconds") }
+        XCTAssertTrue(waitUntil { publishedDevices().contains(device) }, "Private test aggregate must be published before checking filtering")
         XCTAssertFalse(DeviceInventory.microphones().contains { $0.deviceID == device },
                        "Private engine aggregates must not turn a single microphone setup into an ambiguous choice")
     }
@@ -64,7 +82,7 @@ final class PrivateAggregateTests: XCTestCase {
         let device = try makeAggregate(isPrivate: false)
         defer { AudioHardwareDestroyAggregateDevice(device) }
         guard waitForInput(device) else { return XCTFail("HAL aggregate did not expose a live input within 5 seconds") }
-        XCTAssertTrue(DeviceInventory.microphones().contains { $0.deviceID == device },
-                      "User-created public aggregates must remain available")
+        XCTAssertTrue(waitUntil { DeviceInventory.microphones().contains { $0.deviceID == device } },
+                      "User-created public aggregates must remain available; HAL published device: \(publishedDevices().contains(device))")
     }
 }
