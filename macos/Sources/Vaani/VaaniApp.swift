@@ -614,11 +614,11 @@ struct SettingsView: View {
             }
             card("Sync now · Tailscale") {
                 Text("Pair Android once, then choose which device's settings to use. Both devices must be on your Tailscale network; this Mac must be awake and sharing.").font(.callout)
-                TextField("This Mac's Tailscale IPv4 · 100.x.x.x", text: $sync.host).textFieldStyle(.roundedBorder).disabled(sync.running)
+                TextField("This Mac's Tailscale IPv4 · 100.x.x.x", text: $sync.host).textFieldStyle(.roundedBorder).disabled(sync.running || sync.starting)
                 HStack {
-                    Button(sync.running ? "Stop sharing" : "Start sharing") { if sync.running { sync.stop() } else { sync.start() } }
+                    Button(sync.starting ? "Cancel sharing" : sync.running ? "Stop sharing" : "Start sharing") { if sync.running || sync.starting { sync.stop() } else { sync.start() } }
                     if sync.running { Button("Copy pairing code", action: sync.copyPairingCode) }
-                    Button("Revoke pairing", action: sync.revoke)
+                    Button("Revoke pairing", action: sync.revoke).disabled(sync.starting)
                 }
                 Text(sync.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 Text("Transfers language, dictionary, prompt and provider settings with authenticated encryption. Sarvam and polishing API keys sync into secure storage. Empty source keys keep the receiving device’s saved keys. Audio, transcripts and microphone setups stay local. Sharing starts only when you click Start sharing; it stops when Vaani quits.").font(.caption).foregroundStyle(.secondary)

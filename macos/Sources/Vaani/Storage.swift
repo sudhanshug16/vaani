@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Security
 import LocalAuthentication
 import VaaniCore
@@ -57,9 +58,25 @@ enum Vault {
                 do {
                     let sarvam = try read("sarvam", allowInteraction: true)
                     let processing = try read("processing", allowInteraction: true)
+                    _ = try read("settings-sync", allowInteraction: true)
                     continuation.resume(returning: (sarvam, processing))
                 }
                 catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+    // Start sharing is an explicit user action. Read/create the pairing credential
+    // with normal OS approval off the UI thread; never rotate an unreadable key.
+    static func sharingSecret() async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let saved = try read("settings-sync", allowInteraction: true)
+                    if !saved.isEmpty { continuation.resume(returning: saved); return }
+                    let secret = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() }
+                    try save(secret, account: "settings-sync", allowInteraction: true)
+                    continuation.resume(returning: secret)
+                } catch { continuation.resume(throwing: error) }
             }
         }
     }
@@ -70,9 +87,9 @@ enum Vault {
         }
         return VaaniError.message("Keychain operation failed (\(status)). Your saved credential was not changed.")
     }
-    static func save(_ value: String, account: String) throws {
-        try withAccess {
-            let authentication = LAContext(); authentication.interactionNotAllowed = true
+    static func save(_ value: String, account: String, allowInteraction: Bool = false) throws {
+        try withAccess(allowInteraction: allowInteraction) {
+            let authentication = LAContext(); authentication.interactionNotAllowed = !allowInteraction
             let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: "dev.vaani", kSecAttrAccount as String: account,
                 kSecUseAuthenticationContext as String: authentication]

@@ -8,6 +8,7 @@ import VaaniCore
 @MainActor final class SettingsSyncController: ObservableObject {
     @Published var host: String
     @Published private(set) var running = false
+    @Published private(set) var starting = false
     @Published private(set) var message = "Start sharing on your Tailscale address, then pair Android."
     @Published private(set) var pending: SharedPreferences?
     @Published private(set) var pairingCode = ""
@@ -15,6 +16,8 @@ import VaaniCore
     private var fixtureCredentials = SyncCredentials()
     private let store: PreferenceStore
     private let isBusy: () -> Bool
+    private let loadSharingSecret: () async throws -> String
+    private let addresses: () -> [String]
     private var listener: NWListener?
     private var peers: [UUID: SyncPeer] = [:]
     private var replay = SyncReplayGuard()
@@ -23,11 +26,14 @@ import VaaniCore
     private var pendingRevision: String?
     private var generation = UUID()
 
-    init(store: PreferenceStore, isBusy: @escaping () -> Bool, ephemeralSecret: String? = nil) {
+    init(store: PreferenceStore, isBusy: @escaping () -> Bool, ephemeralSecret: String? = nil,
+         loadSharingSecret: @escaping () async throws -> String = { try await Vault.sharingSecret() },
+         addresses: @escaping () -> [String] = { SettingsSyncController.tailnetAddresses() }) {
         self.store = store; self.isBusy = isBusy; self.ephemeralSecret = ephemeralSecret
-        host = UserDefaults.standard.string(forKey: "vaani.sync.host") ?? Self.tailnetAddresses().first ?? ""
+        self.loadSharingSecret = loadSharingSecret; self.addresses = addresses
+        host = UserDefaults.standard.string(forKey: "vaani.sync.host") ?? addresses().first ?? ""
     }
-    static func tailnetAddresses() -> [String] {
+    nonisolated static func tailnetAddresses() -> [String] {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0 else { return [] }
         defer { freeifaddrs(head) }
@@ -44,55 +50,70 @@ import VaaniCore
         return results.sorted()
     }
     func start(fixtureSecret: String? = nil) {
-        guard !running, listener == nil else { return }
+        guard !running, !starting, listener == nil else { return }
+        let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard addresses().contains(address) else {
+            message = "Choose a Tailscale IPv4 address currently assigned to this Mac. Connect Tailscale first."
+            return
+        }
         if let fixtureSecret { ephemeralSecret = fixtureSecret }
-        do {
-            let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard Self.tailnetAddresses().contains(address) else { throw VaaniError.message("Choose a Tailscale IPv4 address currently assigned to this Mac. Connect Tailscale first.") }
-            var secret = try fixtureSecret ?? ephemeralSecret ?? Vault.read("settings-sync")
-            if secret.isEmpty {
-                secret = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() }
-                if ephemeralSecret != nil { ephemeralSecret = secret }
-                else { try Vault.save(secret, account: "settings-sync") }
+        let token = UUID(); generation = token; starting = true
+        message = "Unlocking sharing credential… Approve the macOS Keychain prompt if shown."
+        Task { [weak self] in
+            guard let self else { return }
+            defer { if self.generation == token { self.starting = false } }
+            do {
+                let secret: String
+                if let fixture = self.ephemeralSecret {
+                    let value = fixture.isEmpty ? SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() } : fixture
+                    self.ephemeralSecret = value; secret = value
+                } else { secret = try await self.loadSharingSecret() }
+                guard self.generation == token else { return } // Stop/revoke while OS approval was pending.
+                guard self.addresses().contains(address) else { throw VaaniError.message("Tailscale disconnected while unlocking sharing. Reconnect and try again.") }
+                try self.startListener(address: address, secret: secret, token: token)
+            } catch {
+                guard self.generation == token else { return }
+                self.message = error.localizedDescription
             }
-            let pairing = try SyncPairing(host: address, secret: secret).validated()
-            let pairSecret = pairing.secret
-            let parameters = NWParameters.tcp
-            parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(address), port: NWEndpoint.Port(rawValue: pairing.port)!)
-            let service = try NWListener(using: parameters)
-            let token = UUID(); generation = token
-            service.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor in
-                    guard let self, self.generation == token else { return }
-                    switch state {
-                    case .ready:
-                        self.running = true; self.pairingCode = (try? pairing.code()) ?? ""
-                        self.host = address; UserDefaults.standard.set(address, forKey: "vaani.sync.host")
-                        self.message = "Ready on \(address):\(pairing.port). Android can Sync now."
-                    case .failed:
-                        self.stop(); self.message = "Could not listen on Tailscale. Check that the address is connected and the port is available."
-                    default: break
-                    }
+        }
+    }
+    private func startListener(address: String, secret: String, token: UUID) throws {
+        let pairing = try SyncPairing(host: address, secret: secret).validated()
+        let pairSecret = pairing.secret
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(address), port: NWEndpoint.Port(rawValue: pairing.port)!)
+        let service = try NWListener(using: parameters)
+        service.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                guard let self, self.generation == token else { return }
+                switch state {
+                case .ready:
+                    self.running = true; self.pairingCode = (try? pairing.code()) ?? ""
+                    self.host = address; UserDefaults.standard.set(address, forKey: "vaani.sync.host")
+                    self.message = "Ready on \(address):\(pairing.port). Android can Sync now."
+                case .failed:
+                    self.stop(); self.message = "Could not listen on Tailscale. Check that the address is connected and the port is available."
+                default: break
                 }
             }
-            service.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in
-                    guard let self, self.generation == token, self.running, self.peers.count < 8 else { connection.cancel(); return }
-                    let id = UUID()
-                    let peer = SyncPeer(connection: connection, secret: pairSecret,
-                        handle: { [weak self] request in
-                            guard let self, self.generation == token else { throw VaaniError.message("Sync stopped.") }
-                            return try self.handle(request)
-                        }, closed: { [weak self] in self?.peers[id] = nil })
-                    self.peers[id] = peer; peer.start()
-                }
+        }
+        service.newConnectionHandler = { [weak self] connection in
+            Task { @MainActor in
+                guard let self, self.generation == token, self.running, self.peers.count < 8 else { connection.cancel(); return }
+                let id = UUID()
+                let peer = SyncPeer(connection: connection, secret: pairSecret,
+                    handle: { [weak self] request in
+                        guard let self, self.generation == token else { throw VaaniError.message("Sync stopped.") }
+                        return try self.handle(request)
+                    }, closed: { [weak self] in self?.peers[id] = nil })
+                self.peers[id] = peer; peer.start()
             }
-            listener = service; message = "Starting Tailscale sharing…"
-            service.start(queue: .main)
-        } catch { message = error.localizedDescription }
+        }
+        listener = service; message = "Starting Tailscale sharing…"
+        service.start(queue: .main)
     }
     func stop() {
-        generation = UUID(); listener?.cancel(); listener = nil
+        generation = UUID(); starting = false; listener?.cancel(); listener = nil
         let active = Array(peers.values); peers.removeAll(); active.forEach { $0.close() }
         running = false; pairingCode = ""; pending = nil; pendingRevision = nil; pendingCredentials = nil; pendingKeySummary = ""
         message = "Sharing stopped. Paired devices cannot connect until you start it again."
