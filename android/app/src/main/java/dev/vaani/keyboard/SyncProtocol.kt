@@ -32,6 +32,27 @@ data class SyncPairing(val host: String, val port: Int, val secret: String) {
     }
 }
 
+/** Only provider credentials; never pairing secrets or arbitrary preference fields. */
+class SyncCredentials(val sarvam: String? = null, val processing: String? = null) {
+    init { require(listOfNotNull(sarvam, processing).all { it.toByteArray(Charsets.UTF_8).size <= 16384 }) { "Sync credential exceeds size limit" } }
+    fun entries() = listOf("sarvam" to sarvam, "processing" to processing).mapNotNull { (account, value) ->
+        value?.takeIf { it.isNotBlank() }?.let { account to it }
+    }
+    fun json() = JSONObject().also { result -> entries().forEach { (account, value) -> result.put(account, value) } }
+    fun summary() = entries().joinToString(", ") { if (it.first == "sarvam") "Sarvam" else "Polishing" }.ifBlank { "None (saved keys stay unchanged)" }
+    override fun toString() = "SyncCredentials(<redacted>)"
+    companion object {
+        fun parse(value: JSONObject): SyncCredentials {
+            fun key(name: String): String? {
+                if (!value.has(name) || value.isNull(name)) return null
+                require(value.get(name) is String) { "Invalid sync credential" }
+                return value.getString(name)
+            }
+            return SyncCredentials(key("sarvam"), key("processing"))
+        }
+    }
+}
+
 object SyncProtocol {
     const val maximumFrame = 256000
     private fun aad(direction: String) = "dev.vaani.settings.v1.$direction".toByteArray(Charsets.UTF_8)
@@ -54,13 +75,14 @@ object SyncProtocol {
         cipher.updateAAD(aad(direction))
         return cipher.doFinal(data, 12, data.size - 12)
     }
-    fun request(operation: String, revision: String? = null, settings: JSONObject? = null): JSONObject {
+    fun request(operation: String, revision: String? = null, settings: JSONObject? = null, credentials: SyncCredentials? = null): JSONObject {
         require(operation in listOf("get", "offer"))
-        val result = JSONObject().put("version", 1).put("id", UUID.randomUUID().toString())
+        val result = JSONObject().put("version", 2).put("id", UUID.randomUUID().toString())
             .put("timestamp", System.currentTimeMillis() / 1000).put("operation", operation)
         if (operation == "offer") {
             require(revision?.matches(Regex("[0-9a-f]{64}")) == true) { "Refresh settings before sending" }
             result.put("expectedRevision", revision).put("settings", Preferences.canonical(settings ?: error("Missing settings")))
+            result.put("credentials", (credentials ?: SyncCredentials()).json())
         }
         return result
     }

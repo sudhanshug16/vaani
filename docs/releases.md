@@ -42,7 +42,7 @@ in Git or release assets.
 **Existing debug installations use a different key.** Export shared settings
 first; moving to the first release APK requires uninstalling the debug app,
 installing the release APK, importing shared settings and re-entering API keys.
-API keys and microphone setup choices are device-local and are not exported.
+API keys and microphone setup choices are not included in file exports. Saved provider keys can be transferred using explicit paired Tailscale sync.
 Subsequent release APKs use the same release key and retain app data on update.
 The release workflow does not uninstall or migrate anyone's app automatically.
 

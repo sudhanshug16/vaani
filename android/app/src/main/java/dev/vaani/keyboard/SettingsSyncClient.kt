@@ -7,7 +7,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 
-data class SyncSnapshot(val revision: String, val settings: JSONObject)
+data class SyncSnapshot(val revision: String, val settings: JSONObject, val credentials: SyncCredentials)
 
 class SettingsSyncClient(private val pairing: SyncPairing) {
     fun fetch(): SyncSnapshot {
@@ -15,10 +15,11 @@ class SettingsSyncClient(private val pairing: SyncPairing) {
         check(reply.getString("status") == "ok") { statusMessage(reply.getString("status")) }
         val revision = reply.getString("revision")
         check(revision.matches(Regex("[0-9a-f]{64}"))) { "Invalid settings revision" }
-        return SyncSnapshot(revision, Preferences.canonical(reply.getJSONObject("settings")))
+        check(reply.has("credentials")) { "Update Vaani on Mac to sync API keys." }
+        return SyncSnapshot(revision, Preferences.canonical(reply.getJSONObject("settings")), SyncCredentials.parse(reply.getJSONObject("credentials")))
     }
-    fun offer(snapshot: SyncSnapshot, settings: JSONObject): String {
-        val reply = exchange(SyncProtocol.request("offer", snapshot.revision, settings))
+    fun offer(snapshot: SyncSnapshot, settings: JSONObject, credentials: SyncCredentials): String {
+        val reply = exchange(SyncProtocol.request("offer", snapshot.revision, settings, credentials))
         val status = reply.getString("status")
         check(status == "review") { statusMessage(status) }
         return "Sent to Mac. Open Vaani → Devices on the Mac to review and apply."
@@ -40,7 +41,7 @@ class SettingsSyncClient(private val pairing: SyncPairing) {
             val plain = try { SyncProtocol.open(frame, pairing.secret, "response") }
                 catch (_: Exception) { error("Could not authenticate Mac. Pair again if the code was revoked.") }
             val reply = JSONObject(String(plain, Charsets.UTF_8))
-            check(reply.getInt("version") == 1 && reply.getString("id") == request.getString("id")) { "Unexpected sync response" }
+            check(reply.getInt("version") == 2 && reply.getString("id") == request.getString("id")) { "Unexpected sync response" }
             return reply
         }
     }

@@ -179,11 +179,11 @@ class SettingsActivity : Activity() {
             check(!syncBusy) { "Wait for the current sync to finish." }
             prefs.saveKey("settings-sync-peer", ""); pairing.text.clear(); refreshPairingStatus(); "Pairing removed from Android. Revoke it on Mac to invalidate the code."
         } }
-        label("Transfers language, dictionary, prompt and provider settings with authenticated encryption. Review which device's settings to use each time. API keys, microphone choices, audio and transcripts stay on their device.")
+        label("Transfers language, dictionary, prompt and provider settings with authenticated encryption. Review which device's settings to use each time. Sarvam and polishing API keys sync into secure storage. Empty source keys keep saved destination keys. Microphone choices, audio and transcripts stay on their device.")
         refreshPairingStatus()
         root = shell
-        button("Save settings & keys") { attempt { save(); "Saved. Keys stay on this device." } }
-        attempt { load(); "Keys stay on this device." }
+        button("Save settings & keys") { attempt { save(); "Saved in secure storage. Paired sync includes API keys." } }
+        attempt { load(); "API keys are stored securely." }
         selectSection(savedInstanceState?.getString("section") ?: intent.getStringExtra("section")?.takeIf { it in sections } ?: "Voice")
     }
     private fun section(name: String) {
@@ -305,6 +305,7 @@ class SettingsActivity : Activity() {
             val peer = SyncPairing.parse(pairingCode)
             save()
             val local = prefs.shared
+            val localCredentials = prefs.syncCredentials()
             syncBusy = true; reportSync("Connecting to paired Mac…")
             Thread {
                 try {
@@ -314,12 +315,12 @@ class SettingsActivity : Activity() {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         val remote = snapshot.settings
                         AlertDialog.Builder(this).setTitle("Choose settings for this sync")
-                            .setMessage("Mac: ${peer.host}\n\nMac API destination: ${remote.getString("endpoint")}\nProcessing: ${remote.getBoolean("processingEnabled")} · ${remote.getString("model")}\nLanguage: ${remote.getString("language")} · ${remote.getString("mode")}\nDictionary: ${remote.getJSONArray("dictionary")}\n\nMac prompt:\n${remote.getString("prompt")}\n\nAndroid API destination: ${local.getString("endpoint")}\n\nUse Mac replaces shared settings on Android. Send Android requires review on Mac. Keys and microphone choices stay local.")
+                            .setMessage("Mac: ${peer.host}\n\nMac API destination: ${remote.getString("endpoint")}\nProcessing: ${remote.getBoolean("processingEnabled")} · ${remote.getString("model")}\nLanguage: ${remote.getString("language")} · ${remote.getString("mode")}\nDictionary: ${remote.getJSONArray("dictionary")}\n\nMac prompt:\n${remote.getString("prompt")}\n\nAndroid API destination: ${local.getString("endpoint")}\n\nUse Mac replaces shared settings on Android. Send Android requires review on Mac. API keys from Mac: ${snapshot.credentials.summary()}. Available keys replace Android’s saved keys. Missing keys stay unchanged. Microphone choices stay local.")
                             .setPositiveButton("Use Mac") { _, _ -> syncAttempt {
-                                check(sharedDraft().toString() == local.toString()) { "Android settings changed. Sync now again." }
-                                prefs.shared = remote; load(); "Mac settings applied on Android."
+                                check(sharedDraft().toString() == local.toString() && sarvam.text.toString().trim() == (localCredentials.sarvam ?: "") && apiKey.text.toString().trim() == (localCredentials.processing ?: "")) { "Android settings changed. Sync now again." }
+                                prefs.applySync(remote, snapshot.credentials); load(); "Mac settings and available API keys applied on Android."
                             } }
-                            .setNeutralButton("Send Android") { _, _ -> offerSettings(peer, snapshot, local) }
+                            .setNeutralButton("Send Android") { _, _ -> offerSettings(peer, snapshot, local, localCredentials) }
                             .setNegativeButton("Cancel", null).show()
                         reportSync("Review sync direction and provider destination.")
                     }
@@ -329,15 +330,15 @@ class SettingsActivity : Activity() {
             }.start()
         } catch (error: Exception) { reportSync(error.message ?: "Pair with Mac first.") }
     }
-    private fun offerSettings(peer: SyncPairing, snapshot: SyncSnapshot, local: JSONObject) {
+    private fun offerSettings(peer: SyncPairing, snapshot: SyncSnapshot, local: JSONObject, credentials: SyncCredentials) {
         if (syncBusy) return
-        if (sharedDraft().toString() != local.toString()) {
+        if (sharedDraft().toString() != local.toString() || sarvam.text.toString().trim() != (credentials.sarvam ?: "") || apiKey.text.toString().trim() != (credentials.processing ?: "")) {
             reportSync("Android settings changed. Sync now again to review the latest settings.")
             return
         }
         syncBusy = true; reportSync("Sending settings to Mac for review…")
         Thread {
-            val result = try { SettingsSyncClient(peer).offer(snapshot, local) }
+            val result = try { SettingsSyncClient(peer).offer(snapshot, local, credentials) }
                 catch (error: Exception) { error.message ?: "Could not send settings. Check Tailscale and Mac sharing." }
             runOnUiThread { syncBusy = false; if (!isDestroyed) reportSync(result) }
         }.start()

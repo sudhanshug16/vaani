@@ -12,11 +12,14 @@ import VaaniCore
     @Published private(set) var pending: SharedPreferences?
     @Published private(set) var pairingCode = ""
     private var ephemeralSecret: String?
+    private var fixtureCredentials = SyncCredentials()
     private let store: PreferenceStore
     private let isBusy: () -> Bool
     private var listener: NWListener?
     private var peers: [UUID: SyncPeer] = [:]
     private var replay = SyncReplayGuard()
+    @Published private(set) var pendingKeySummary = ""
+    private var pendingCredentials: SyncCredentials?
     private var pendingRevision: String?
     private var generation = UUID()
 
@@ -42,6 +45,7 @@ import VaaniCore
     }
     func start(fixtureSecret: String? = nil) {
         guard !running, listener == nil else { return }
+        if let fixtureSecret { ephemeralSecret = fixtureSecret }
         do {
             let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
             guard Self.tailnetAddresses().contains(address) else { throw VaaniError.message("Choose a Tailscale IPv4 address currently assigned to this Mac. Connect Tailscale first.") }
@@ -90,7 +94,7 @@ import VaaniCore
     func stop() {
         generation = UUID(); listener?.cancel(); listener = nil
         let active = Array(peers.values); peers.removeAll(); active.forEach { $0.close() }
-        running = false; pairingCode = ""; pending = nil; pendingRevision = nil
+        running = false; pairingCode = ""; pending = nil; pendingRevision = nil; pendingCredentials = nil; pendingKeySummary = ""
         message = "Sharing stopped. Paired devices cannot connect until you start it again."
     }
     func revoke() {
@@ -102,30 +106,50 @@ import VaaniCore
         }
         catch { message = error.localizedDescription }
     }
+    private func credentials() throws -> SyncCredentials {
+        if ephemeralSecret != nil { return fixtureCredentials } // Isolated fixtures never open personal Keychain.
+        return try SyncCredentials(sarvam: Vault.read("sarvam"), processing: Vault.read("processing")).validated()
+    }
     private func handle(_ request: SyncRequest) throws -> SyncResponse {
         try replay.accept(request)
-        guard !isBusy() else { return SyncResponse(id: request.id, status: "dictating") }
-        let revision = try SettingsSync.revision(store.shared)
+        guard !isBusy() else { return SyncResponse(id: request.id, status: "dictating", version: request.version) }
+        let keys = request.version == 2 ? try credentials() : nil
+        let revision = try SettingsSync.revision(store.shared, credentials: keys)
         if request.operation == "get" {
-            return SyncResponse(id: request.id, status: "ok", revision: revision, settings: try store.shared.validated())
+            return SyncResponse(id: request.id, status: "ok", revision: revision, settings: try store.shared.validated(), credentials: keys, version: request.version)
         }
-        guard request.expectedRevision == revision else { return SyncResponse(id: request.id, status: "conflict") }
-        guard pending == nil else { return SyncResponse(id: request.id, status: "pending") }
+        guard request.expectedRevision == revision else { return SyncResponse(id: request.id, status: "conflict", version: request.version) }
+        guard pending == nil else { return SyncResponse(id: request.id, status: "pending", version: request.version) }
         pending = try request.settings?.validated(); pendingRevision = revision
+        pendingCredentials = request.version == 2 ? try (request.credentials ?? SyncCredentials()).validated() : nil
+        pendingKeySummary = pendingCredentials?.entries.map { $0.0 == "sarvam" ? "Sarvam" : "Polishing" }.joined(separator: ", ") ?? ""
         message = "Android sent settings. Review the provider destination below before applying."
-        return SyncResponse(id: request.id, status: "review")
+        return SyncResponse(id: request.id, status: "review", version: request.version)
     }
     func applyPending() {
         do {
-            guard !isBusy(), let incoming = pending, pendingRevision == (try SettingsSync.revision(store.shared)) else {
+            guard !isBusy(), let incoming = pending, pendingRevision == (try SettingsSync.revision(store.shared, credentials: pendingCredentials == nil ? nil : credentials())) else {
                 throw VaaniError.message("Mac settings changed or dictation is active. Discard this offer and Sync now again.")
             }
-            let before = store.shared; store.shared = try incoming.validated()
-            guard store.save() else { store.shared = before; throw VaaniError.message("Could not save incoming settings.") }
-            pending = nil; pendingRevision = nil; message = "Settings from Android applied. Keys and microphones stayed on this Mac."
+            let before = store.shared
+            try (pendingCredentials ?? SyncCredentials()).apply(read: { account in
+                if self.ephemeralSecret != nil { return self.fixtureCredentials.entries.first { $0.0 == account }?.1 ?? "" }
+                return try Vault.read(account)
+            }, save: { account, value in
+                if self.ephemeralSecret != nil {
+                    if account == "sarvam" { self.fixtureCredentials.sarvam = value }
+                    if account == "processing" { self.fixtureCredentials.processing = value }
+                    return
+                }
+                try Vault.save(value, account: account)
+            }, persist: {
+                store.shared = try incoming.validated()
+                guard store.save() else { store.shared = before; throw VaaniError.message("Could not save incoming settings.") }
+            })
+            pending = nil; pendingRevision = nil; pendingCredentials = nil; pendingKeySummary = ""; message = "Settings and available API keys from Android applied. Microphone choices stayed on this Mac."
         } catch { message = error.localizedDescription }
     }
-    func discardPending() { pending = nil; pendingRevision = nil; message = "Incoming settings discarded." }
+    func discardPending() { pending = nil; pendingRevision = nil; pendingCredentials = nil; pendingKeySummary = ""; message = "Incoming settings discarded." }
     func copyPairingCode() {
         guard !pairingCode.isEmpty else { return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pairingCode, forType: .string)

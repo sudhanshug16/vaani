@@ -30,4 +30,21 @@ class SyncProtocolTest {
         assertFalse(offer.has("sarvamKey")); assertFalse(offer.has("microphone"))
         assertThrows(IllegalArgumentException::class.java) { SyncProtocol.seal(ByteArray(256000), secret, "request") }
     }
+    @Test fun providerKeysUseSeparateEncryptedVersionTwoPayload() {
+        val keys = SyncCredentials("test-speech", "test-polish")
+        val request = SyncProtocol.request("offer", "a".repeat(64), Preferences.defaults(), keys)
+        assertEquals(2, request.getInt("version"))
+        assertFalse(request.getJSONObject("settings").has("sarvam"))
+        val encrypted = SyncProtocol.seal(request.toString().toByteArray(), secret, "request")
+        assertFalse(String(encrypted).contains("test-speech"))
+        val decoded = org.json.JSONObject(String(SyncProtocol.open(encrypted, secret, "request")))
+        val restored = SyncCredentials.parse(decoded.getJSONObject("credentials"))
+        assertEquals("test-speech", restored.sarvam)
+        assertEquals("test-polish", restored.processing)
+        assertFalse(restored.toString().contains("test-speech"))
+        assertTrue(SyncCredentials(null, " ").entries().isEmpty())
+        assertThrows(IllegalArgumentException::class.java) { SyncCredentials("x".repeat(16385)) }
+        assertThrows(IllegalArgumentException::class.java) { SyncCredentials.parse(org.json.JSONObject().put("sarvam", 7)) }
+        assertFalse(SyncCredentials.parse(org.json.JSONObject().put("settings-sync-peer", "secret")).json().has("settings-sync-peer"))
+    }
 }

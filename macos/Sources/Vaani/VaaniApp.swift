@@ -621,10 +621,11 @@ struct SettingsView: View {
                     Button("Revoke pairing", action: sync.revoke)
                 }
                 Text(sync.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                Text("Transfers language, dictionary, prompt and provider settings with authenticated encryption. Keys, audio, transcripts and microphone setups stay local. Sharing starts only when you click Start sharing; it stops when Vaani quits.").font(.caption).foregroundStyle(.secondary)
+                Text("Transfers language, dictionary, prompt and provider settings with authenticated encryption. Sarvam and polishing API keys sync into secure storage. Empty source keys keep the receiving device’s saved keys. Audio, transcripts and microphone setups stay local. Sharing starts only when you click Start sharing; it stops when Vaani quits.").font(.caption).foregroundStyle(.secondary)
             }
             if let incoming = sync.pending {
                 card("Review settings from Android") {
+                    Text(sync.pendingKeySummary.isEmpty ? "No API keys to replace; saved keys stay unchanged." : "API keys to replace: \(sync.pendingKeySummary)")
                     Text("API destination: \(incoming.endpoint)")
                     Text("Processing: \(incoming.processingEnabled ? "enabled" : "disabled") · Model: \(incoming.model) · Language: \(incoming.language) · Output: \(incoming.mode)")
                     Text("Dictionary: \(incoming.dictionary.joined(separator: ", "))").font(.caption).textSelection(.enabled)

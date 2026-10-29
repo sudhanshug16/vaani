@@ -37,4 +37,30 @@ final class SettingsSyncTests: XCTestCase {
         XCTAssertEqual(try SettingsSync.frame(Data(repeating: 0, count: 28)).prefix(4), Data([0, 0, 0, 28]))
         XCTAssertThrowsError(try SettingsSync.frame(Data(repeating: 0, count: 256_001)))
     }
+    func testCredentialSyncIsEncryptedAndVersionedSeparatelyFromSettings() throws {
+        let keys = SyncCredentials(sarvam: "test-speech-key", processing: "test-polish-key")
+        let request = SyncRequest(operation: "offer", expectedRevision: String(repeating: "a", count: 64), settings: SharedPreferences(), credentials: keys, version: 2)
+        XCTAssertNoThrow(try request.validated())
+        let bytes = try JSONEncoder().encode(request)
+        let sealed = try SettingsSync.seal(bytes, secret: secret, direction: "request")
+        XCTAssertNil(sealed.range(of: Data("test-speech-key".utf8)))
+        let decoded = try JSONDecoder().decode(SyncRequest.self, from: SettingsSync.open(sealed, secret: secret, direction: "request"))
+        XCTAssertEqual(decoded.credentials, keys)
+        XCTAssertFalse(String(describing: keys).contains("test-speech-key"))
+        XCTAssertThrowsError(try SyncRequest(operation: "get", credentials: keys).validated())
+        XCTAssertThrowsError(try SyncCredentials(sarvam: String(repeating: "x", count: 16385)).validated())
+        XCTAssertNotEqual(try SettingsSync.revision(SharedPreferences(), credentials: keys), try SettingsSync.revision(SharedPreferences(), credentials: SyncCredentials(sarvam: "changed")))
+    }
+    func testMissingKeysPreserveDestinationAndFailuresRollBack() throws {
+        var saved = ["sarvam": "old-speech", "processing": "old-polish"]
+        try SyncCredentials(sarvam: "new-speech", processing: " ").apply(read: { saved[$0] ?? "" }, save: { saved[$0] = $1 }, persist: {})
+        XCTAssertEqual(saved, ["sarvam": "new-speech", "processing": "old-polish"])
+        let before = saved
+        XCTAssertThrowsError(try SyncCredentials(sarvam: "another", processing: "new-polish").apply(read: { saved[$0] ?? "" }, save: { saved[$0] = $1 }, persist: { throw VaaniError.message("Disk failure") }))
+        XCTAssertEqual(saved, before)
+        XCTAssertThrowsError(try SyncCredentials(sarvam: "another", processing: "bad").apply(read: { saved[$0] ?? "" }, save: { account, value in
+            if value == "bad" { throw VaaniError.message("Keychain failure") }; saved[account] = value
+        }, persist: { XCTFail("Settings must not save after key failure") }))
+        XCTAssertEqual(saved, before)
+    }
 }

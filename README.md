@@ -94,7 +94,9 @@ File export/import remains available for Taildrop, USB or another transfer. File
 
 Included: language, output mode, Sarvam model, recognition-hints toggle, prompt, dictionary, processing toggle, provider URL and model.
 
-Excluded: API keys, audio, transcripts, microphone IDs and setup preferences.
+Paired sync also includes saved Sarvam and polishing API keys, stored in the receiving device’s Keychain/Keystore. Available source keys replace destination keys; missing/blank source keys leave destination keys unchanged. Both devices need a current version for key sync. Review the provider destination before applying.
+
+File exports exclude API keys. Audio, transcripts, microphone IDs, setup preferences and pairing secrets are never included in settings sync/export.
 
 Transfers use AES-256-GCM authentication and encryption in addition to Tailscale. A 256-bit pairing secret stays in Mac Keychain / Android Keystore storage. Sync is explicit; there is no automatic background merge. See [architecture](docs/architecture.md) for protocol and limits.
 
@@ -103,7 +105,7 @@ Transfers use AES-256-GCM authentication and encryption in addition to Tailscale
 - Audio streams directly to Sarvam while recording. Optional polishing sends the transcript and dictionary to your configured provider.
 - Vaani writes no audio or transcript history. Current text stays in memory until another recording or app exit. Pasted/copied text stays on the system clipboard.
 - Microphone preferences and settings stay local, unless you explicitly sync or export the shared subset. Providers have their own data policies.
-- No telemetry, analytics, account, background recording or secret sync.
+- No telemetry, analytics, hosted account or background recording. API key transfer happens only through explicit paired sync.
 - No existing Kivi/Wispr preferences or credentials are read or changed.
 
 See [synthetic language results](docs/language-validation.md) and [validation and next steps](docs/validation.md) for the remaining acceptance work. MIT licensed.

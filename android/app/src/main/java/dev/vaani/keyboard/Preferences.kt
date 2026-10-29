@@ -33,6 +33,19 @@ class Preferences(context: Context) {
         val stored = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
         check(prefs.edit().putString("key.$account", stored).commit()) { "Could not save credential." }
     }
+    fun syncCredentials() = SyncCredentials(key("sarvam"), key("processing"))
+    /** Encrypt every key before committing settings and credentials atomically. */
+    fun applySync(settings: JSONObject, credentials: SyncCredentials) {
+        val canonical = canonical(settings)
+        val edit = prefs.edit().putString("shared", canonical.toString())
+        for ((account, value) in credentials.entries()) {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, secret())
+            val stored = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+            edit.putString("key.$account", stored)
+        }
+        check(edit.commit()) { "Could not save synced settings and API keys." }
+    }
     private fun secret(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey("vaani.credentials", null) as? SecretKey)?.let { return it }
