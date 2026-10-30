@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import OSLog
 import VaaniCore
 
@@ -23,7 +22,6 @@ import VaaniCore
             try PasteWindowGuard(original: window, current: {
                 PasteDestination.element(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute)
             }, same: { CFEqual($0, $1) }, checkProtectedFocus: {
-                guard !IsSecureEventInputEnabled() else { throw VaaniError.message("Secure input is active. Nothing was pasted; use Copy when ready.") }
                 // Reject any password field that the app does expose, including
                 // focused secure descendants of web-area wrappers.
                 _ = try PasteDestination.resolvedElement(pid: pid)
@@ -32,7 +30,6 @@ import VaaniCore
     }
 
     static func capture(pid: pid_t) async throws -> Capture {
-        guard !IsSecureEventInputEnabled() else { throw VaaniError.message("Dictation is off while a secure input is active.") }
         guard AXIsProcessTrusted() else {
             return Capture(destination: nil, window: nil, issue: "Accessibility was unavailable when dictation started. Enable it, then start a new dictation from your text field. Copy remains available.")
         }
@@ -42,7 +39,6 @@ import VaaniCore
         // simply reject this attribute. No app content or text is read.
         for attempt in 0..<7 {
             try Task.checkCancellation()
-            guard !IsSecureEventInputEnabled() else { throw VaaniError.message("Dictation is off while a secure input is active.") }
             guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
                 throw VaaniError.message("The destination app changed before recording started. Focus your text field and start again.")
             }
@@ -64,7 +60,6 @@ import VaaniCore
             : "Editor details unavailable. Dictation will paste into this window's current input.")
     }
     func validate() throws {
-        guard !IsSecureEventInputEnabled() else { throw VaaniError.message("Secure input is active. Nothing was pasted; use Copy when ready.") }
         try originalWindow?.validate()
         if let focused = try Self.resolvedElement(pid: pid) { try Self.requireTextInput(focused) }
     }
