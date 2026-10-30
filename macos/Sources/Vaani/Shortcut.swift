@@ -5,13 +5,15 @@ import VaaniCore
 // Ordinary shortcuts use the OS hot-key dispatcher. Modifier taps are passive
 // observers: a busy UI thread must never hold the global keyboard/mouse stream.
 final class Shortcut {
+    private let permissionGranted: () -> Bool
+    init(permissionGranted: @escaping () -> Bool = { AXIsProcessTrusted() }) { self.permissionGranted = permissionGranted }
     var action: (() -> Void)?
     var suspended = false {
         didSet {
             tapState = .init(); hotKeyDown = false
             guard oldValue != suspended, let choice, !choice.modifierOnly else { return }
             removeHotKey()
-            if !suspended { _ = registerHotKey(choice) }
+            if !suspended, permissionGranted() { _ = registerHotKey(choice) }
         }
     }
     static let modifierTapOptions: CGEventTapOptions = .listenOnly
@@ -24,7 +26,7 @@ final class Shortcut {
     private var tapState = ModifierShortcutTap()
     private static let hotKeyID = EventHotKeyID(signature: 0x56616E69, id: 1)
     var ready: Bool {
-        guard let choice else { return false }
+        guard permissionGranted(), let choice else { return false }
         return suspended || (choice.modifierOnly ? port.map { CGEvent.tapIsEnabled(tap: $0) } ?? false : hotKey != nil)
     }
     func unregister() {
@@ -36,9 +38,10 @@ final class Shortcut {
     }
     func register(_ choice: DictationShortcut) -> Bool {
         precondition(Thread.isMainThread)
-        unregister(); self.choice = choice
+        unregister()
+        guard permissionGranted() else { return false }
+        self.choice = choice
         if !choice.modifierOnly { return suspended || registerHotKey(choice) }
-        guard AXIsProcessTrusted() else { return false }
         let types: [CGEventType] = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: Self.modifierTapOptions,
@@ -93,14 +96,16 @@ final class Shortcut {
     }
     private func enqueueAction() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.suspended else { return }
+            guard let self, !self.suspended, self.permissionGranted() else { return }
             Diagnostics.record(.shortcutTriggered); self.action?()
         }
     }
     private func observe(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             Diagnostics.record(.shortcutTapDisabled); tapState = .init()
-            if let port { CGEvent.tapEnable(tap: port, enable: true) }
+            // Do not re-enable from inside the callback: permission may have
+            // just been revoked. The normal retry checks trust, unregisters old
+            // resources, and only registers again after permission is restored.
             return
         }
         guard !suspended, let choice else { return }
