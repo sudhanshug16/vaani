@@ -7,10 +7,18 @@ private final class ProcessingNoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 public enum PostProcessor {
+    // Reuse TLS/HTTP connections across dictations instead of forcing a cold
+    // ephemeral session for every polish. No redirects or disk cache.
+    private static let session = URLSession(configuration: .ephemeral, delegate: ProcessingNoRedirect(), delegateQueue: nil)
     public static func process(_ text: String, preferences: SharedPreferences, key: String) async throws -> String {
-        try await process(text, preferences: preferences, key: key, configuration: .ephemeral)
+        try await process(text, preferences: preferences, key: key, session: session)
     }
     static func process(_ text: String, preferences: SharedPreferences, key: String, configuration: URLSessionConfiguration) async throws -> String {
+        let session = URLSession(configuration: configuration, delegate: ProcessingNoRedirect(), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await process(text, preferences: preferences, key: key, session: session)
+    }
+    private static func process(_ text: String, preferences: SharedPreferences, key: String, session: URLSession) async throws -> String {
         guard preferences.processingEnabled, !text.isEmpty else { return text }
         guard !preferences.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VaaniError.message("Set a post-processing model first.") }
         _ = try preferences.validated()
@@ -31,8 +39,6 @@ public enum PostProcessor {
         if !preferences.serviceTier.isEmpty { body["service_tier"] = preferences.serviceTier }
         if !preferences.reasoningEffort.isEmpty { body["reasoning"] = ["effort": preferences.reasoningEffort] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let session = URLSession(configuration: configuration, delegate: ProcessingNoRedirect(), delegateQueue: nil)
-        defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             throw VaaniError.message("Post-processing failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)). Raw text is preserved.")

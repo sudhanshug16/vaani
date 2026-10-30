@@ -26,7 +26,7 @@ import VaaniCore
         }
     }
     @Published private(set) var startupStep = StartupStep.destination
-    var phaseDescription: String { phase == .connecting ? startupStep.label : (phase == .idle && error != nil ? "Needs attention" : phase.rawValue) }
+    var phaseDescription: String { phase == .connecting ? startupStep.label : (phase == .listening && !speechReady ? "Listening · connecting to Sarvam…" : (phase == .idle && error != nil ? "Needs attention" : phase.rawValue)) }
     private let startupLog = Logger(subsystem: "dev.vaani.mac", category: "Startup")
     private func startup(_ step: StartupStep) {
         startupStep = step
@@ -80,6 +80,8 @@ import VaaniCore
     private let process: (String, SharedPreferences, String) async throws -> String
     private var capture = AudioCapture()
     private var connection: SpeechConnection?
+    private var connectionStartup: Task<Void, Error>?
+    @Published private(set) var speechReady = false
     private var transcript = TranscriptAccumulator()
     private var timer: Timer?
     private var deviceMonitor: DeviceMonitor?
@@ -263,7 +265,7 @@ import VaaniCore
         startup(.destination)
         phase = .connecting; rawText = ""; output = ""; error = nil; notice = nil
         transcript = TranscriptAccumulator(); snapshot = store.shared
-        loggedAudioBuffer = false; loggedAudioSignal = false
+        loggedAudioBuffer = false; loggedAudioSignal = false; speechReady = false
         operation = Task { [weak self] in
             guard let self else { return }
             do {
@@ -304,9 +306,9 @@ import VaaniCore
                     self.speechSessionEnded()
                 }
                 self.startup(.speechConnection)
-                try await connection.connect(key: key, preferences: self.snapshot)
-                try Task.checkCancellation()
-                guard self.generation == token else { return }
+                let preferences = self.snapshot
+                let connecting = Task { try await connection.connect(key: key, preferences: preferences) }
+                self.connectionStartup = connecting
                 guard let device = DeviceInventory.microphones().first(where: { $0.id == self.selectedUID }) else {
                     throw VaaniError.message("The selected microphone disconnected while connecting. Choose another input.")
                 }
@@ -334,6 +336,11 @@ import VaaniCore
                 })
                 self.startup(.listening)
                 self.phase = .listening
+                try await connecting.value
+                try Task.checkCancellation()
+                guard self.generation == token else { return }
+                self.speechReady = true
+                Diagnostics.record(.speechReady, session: token)
             } catch is CancellationError { }
             catch { if self.generation == token { self.fail(error.localizedDescription) } }
         }
@@ -355,9 +362,14 @@ import VaaniCore
         operation = Task { [weak self] in
             guard let self else { return }
             do {
+                // A quick Stop still sends every captured chunk before end,
+                // even if the socket was not ready when the user began speaking.
+                try await self.connectionStartup?.value
+                try Task.checkCancellation()
+                guard self.generation == token else { return }
                 try await self.connection?.finish()
                 guard self.generation == token else { return }
-                self.connection?.cancel(); self.connection = nil
+                self.connection?.cancel(); self.connection = nil; self.connectionStartup = nil
                 self.rawText = self.transcript.liveText
                 self.output = self.rawText
                 guard !self.rawText.isEmpty else { Diagnostics.record(.emptyTranscript, session: token); self.phase = .idle; self.notice = "No speech detected."; return }
@@ -386,6 +398,7 @@ import VaaniCore
         Diagnostics.record(.cancel, reason, session: generation)
         pasteOperation?.cancel(); pasteOperation = nil; isPasting = false
         generation = UUID(); operation?.cancel(); operation = nil
+        connectionStartup?.cancel(); connectionStartup = nil; speechReady = false
         capture.stop(); connection?.cancel(); connection = nil; level = 0; phase = .idle
         if output.isEmpty { output = rawText }
         notice = "Cancelled. Captured text stays here; nothing was inserted."
@@ -393,7 +406,8 @@ import VaaniCore
     private func fail(_ message: String, reason: DiagnosticLog.Detail = .startupFailure) {
         Diagnostics.record(.failure, reason, session: generation)
         startupLog.error("failed stage=\(self.startupStep.rawValue, privacy: .public)")
-        generation = UUID(); operation?.cancel(); capture.stop(); connection?.cancel(); connection = nil
+        generation = UUID(); operation?.cancel(); connectionStartup?.cancel(); connectionStartup = nil; speechReady = false
+        capture.stop(); connection?.cancel(); connection = nil
         if output.isEmpty { output = rawText }
         phase = .idle; level = 0; error = message
     }

@@ -3,7 +3,7 @@ import Foundation
 /// Metadata only: callers cannot attach text, credentials, device names, or provider bodies.
 public final class DiagnosticLog: @unchecked Sendable {
     public enum Event: String, Codable {
-        case launch, command, phase, startup, failure, speechEnded, speechEvent, audioFirstBuffer
+        case launch, command, phase, startup, failure, speechReady, speechEnded, speechEvent, audioFirstBuffer
         case audioFirstSignal, finish, emptyTranscript, reviewRequired, cancel, pasteAttempt, pasteDispatched, pasteFailed
         case shortcutTriggered, shortcutRegistered, shortcutTapDisabled, commandRejected, deviceChange, deviceSettled, microphoneInventory, microphoneSelection, privateAggregatesFiltered
     }
@@ -16,6 +16,7 @@ public final class DiagnosticLog: @unchecked Sendable {
     }
     public struct Entry: Codable {
         public let timestamp: Date
+        public let uptimeNanoseconds: UInt64?
         public let process: Int32
         public let run: UUID
         public let event: Event
@@ -31,7 +32,7 @@ public final class DiagnosticLog: @unchecked Sendable {
         self.directory = directory; self.limit = max(1024, limit)
     }
     public func record(_ event: Event, _ detail: Detail? = nil, session: UUID? = nil, count: Int? = nil) {
-        let entry = Entry(timestamp: Date(), process: ProcessInfo.processInfo.processIdentifier,
+        let entry = Entry(timestamp: Date(), uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds, process: ProcessInfo.processInfo.processIdentifier,
                           run: run, event: event, detail: detail, session: session, count: count)
         queue.async { [self] in
             do {

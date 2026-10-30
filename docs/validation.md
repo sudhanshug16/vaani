@@ -798,3 +798,9 @@ processing smoke passes, and its certificate requirement matches the permanent
 release identity. Local packaging now signs a clean staging bundle and replaces
 the completed app afterward, so building cannot overwrite a running test
 executable or retain an interrupted codesign temporary resource.
+
+## Mac capture startup latency (2026-10-30)
+
+Air metadata logs showed most retained startup delay between speechConnection and microphoneStart, before local capture began. Capture now starts after destination/credential/permission checks while the Sarvam handshake runs concurrently. PCM stays in a bounded in-memory queue until session.begin; no audio history is saved. Quick Finish waits for setup and drains queued audio before sending end. Cancel/failure stops capture, cancels setup and discards the queue. Queue overflow reports failure rather than silently losing words.
+
+Added transport regressions for pre-handshake audio order plus quick Finish, cancellation during handshake, and startup queue overflow. All 127 Swift cases completed with two optional skips and no failures. Existing polishing HTTP/cancellation tests also passed. Production polishing reuses an ephemeral URLSession for connection reuse; provider inference time remains external. Metadata now includes monotonic nanoseconds and a separate speechReady event so mic readiness, network readiness, finalization and polishing can be measured independently. Improved physical Air latency remains to be measured after reopening the updated app.

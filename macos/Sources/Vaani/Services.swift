@@ -24,6 +24,7 @@ extension URLSessionWebSocketTask: SpeechSocket {}
     private var receiver: Task<Void, Never>?
     private var sender: Task<Void, Never>?
     private var continuation: AsyncStream<Data>.Continuation?
+    private let audio: AsyncStream<Data>
     private var ready = false
     private var ended = false
     private var failure: Error?
@@ -31,7 +32,14 @@ extension URLSessionWebSocketTask: SpeechSocket {}
     var onFailure: ((Error) -> Void)?
     var onEnded: (() -> Void)?
 
-    init(makeSocket: ((URLRequest) -> any SpeechSocket)? = nil) { self.makeSocket = makeSocket }
+    init(makeSocket: ((URLRequest) -> any SpeechSocket)? = nil) {
+        self.makeSocket = makeSocket
+        // Capture can begin while the socket opens. Bound the in-memory queue
+        // to ~16 seconds of 100 ms chunks, just above the connection deadline.
+        var sink: AsyncStream<Data>.Continuation?
+        audio = AsyncStream<Data>(bufferingPolicy: .bufferingOldest(160)) { sink = $0 }
+        continuation = sink
+    }
 
     func connect(key: String, preferences: SharedPreferences) async throws {
         var request = URLRequest(url: SarvamProtocol.url(preferences: preferences))
@@ -69,7 +77,7 @@ extension URLSessionWebSocketTask: SpeechSocket {}
         }
         guard ready else { throw VaaniError.message("Sarvam did not begin a session within 15 seconds.") }
         guard !ended else { throw VaaniError.message("Sarvam ended the session before recording began. Try again.") }
-        let stream = AsyncStream<Data>(bufferingPolicy: .bufferingOldest(48)) { self.continuation = $0 }
+        let stream = audio
         sender = Task { [weak self] in
             do {
                 for await chunk in stream {

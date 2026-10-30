@@ -19,7 +19,7 @@ final class DiagnosticLogTests: XCTestCase {
             XCTAssertLessThanOrEqual(data.count, 1024)
             for line in data.split(separator: 10) {
                 let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line)) as? [String: Any])
-                XCTAssertEqual(Set(object.keys), ["timestamp", "process", "run", "event", "detail", "session"])
+                XCTAssertEqual(Set(object.keys), ["timestamp", "uptimeNanoseconds", "process", "run", "event", "detail", "session"])
                 XCTAssertEqual(object["event"] as? String, "command")
                 XCTAssertEqual(object["detail"] as? String, "shortcut")
                 XCTAssertEqual(object["session"] as? String, session.uuidString)

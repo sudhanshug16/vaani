@@ -107,4 +107,45 @@ final class SpeechConnectionTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(socket.sent.count, 1)
     }
+    @MainActor func testAudioCapturedBeforeReadyDrainsBeforeQuickFinish() async throws {
+        let socket = SocketFixture()
+        let connection = SpeechConnection(makeSocket: { _ in socket })
+        defer { connection.cancel() }
+        let startup = Task { try await connection.connect(key: "fixture", preferences: SharedPreferences()) }
+        let sink = connection.audioSink()
+        sink(Data([1, 2])); sink(Data([3, 4]))
+        let finish = Task { try await startup.value; try await connection.finish() }
+        await Task.yield()
+        XCTAssertTrue(socket.sent.isEmpty, "Audio must wait for the server handshake")
+        socket.onSend = { text in
+            if text == #"{"event":"end"}"# { socket.push(#"{"event":"session.end"}"#) }
+        }
+        socket.push(#"{"event":"session.begin"}"#)
+        try await finish.value
+        XCTAssertEqual(socket.sent.count, 3)
+        let messages = try socket.sent.prefix(2).map { try XCTUnwrap(JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String]) }
+        XCTAssertEqual(messages.map { $0["audio"] }, ["AQI=", "AwQ="])
+        XCTAssertEqual(socket.sent.last, #"{"event":"end"}"#)
+    }
+    @MainActor func testCancelledHandshakeDoesNotSendBufferedAudio() async {
+        let socket = SocketFixture()
+        let connection = SpeechConnection(makeSocket: { _ in socket })
+        let startup = Task { try await connection.connect(key: "fixture", preferences: SharedPreferences()) }
+        connection.audioSink()(Data([1, 2]))
+        await Task.yield()
+        startup.cancel(); connection.cancel()
+        do { try await startup.value; XCTFail("Cancelled setup must not succeed") }
+        catch { }
+        XCTAssertTrue(socket.sent.isEmpty)
+    }
+    @MainActor func testStartupBufferOverflowFailsRatherThanDroppingWordsSilently() async {
+        let connection = SpeechConnection(makeSocket: { _ in SocketFixture() })
+        defer { connection.cancel() }
+        var failed = false
+        connection.onFailure = { _ in failed = true }
+        let sink = connection.audioSink()
+        for _ in 0..<161 { sink(Data([1, 2])) }
+        for _ in 0..<100 where !failed { await Task.yield() }
+        XCTAssertTrue(failed)
+    }
 }
