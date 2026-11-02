@@ -42,5 +42,17 @@ final class FloatingPanelSizingTests: XCTestCase {
             XCTAssertFalse(panel.isKeyWindow)
             XCTAssertFalse(panel.isMainWindow)
         }
+        for message in ["Streaming failed: Credits exhausted.", nil] as [String?] {
+            model.error = message
+            let expected = FloatingPanelLayout.size(active: false, controls: false, error: message != nil)
+            for _ in 0..<100 {
+                if abs(panel.frame.width - expected.width) < 0.5 { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertEqual(panel.frame.width, expected.width, accuracy: 0.5)
+            XCTAssertEqual(panel.frame.height, expected.height, accuracy: 0.5)
+            XCTAssertFalse(panel.isKeyWindow)
+            XCTAssertFalse(panel.isMainWindow)
+        }
     }
 }

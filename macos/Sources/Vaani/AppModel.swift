@@ -72,7 +72,18 @@ import VaaniCore
     @Published var rawText = ""
     @Published var output = ""
     @Published var level: Float = 0
-    @Published var error: String?
+    @Published var error: String? {
+        didSet {
+            if error != oldValue, let error {
+                Diagnostics.record(.failureCause, DictationIssue(error).diagnostic, session: generation)
+            }
+        }
+    }
+    var errorIssue: DictationIssue? { error.map(DictationIssue.init) }
+    func resolveError() {
+        if errorIssue?.dashboard == true { NSWorkspace.shared.open(DictationIssue.dashboardURL) }
+        else { showErrorDetails?() }
+    }
     @Published var notice: String?
     @Published private(set) var microphoneNotice: String?
     @Published var devicesSettling = false
@@ -389,7 +400,13 @@ import VaaniCore
                 self.phase = .idle
                 if automaticallyPaste { self.paste() }
             } catch is CancellationError { }
-            catch { if self.generation == token { self.fail(error.localizedDescription) } }
+            catch {
+                if self.generation == token {
+                    let polishing = self.phase == .processing
+                    self.fail(polishing ? "Polishing failed: \(error.localizedDescription)" : error.localizedDescription,
+                              reason: polishing ? .processing : .startupFailure)
+                }
+            }
         }
     }
     func cancel() { cancel(reason: .controls) }
@@ -406,10 +423,11 @@ import VaaniCore
     private func fail(_ message: String, reason: DiagnosticLog.Detail = .startupFailure) {
         Diagnostics.record(.failure, reason, session: generation)
         startupLog.error("failed stage=\(self.startupStep.rawValue, privacy: .public)")
+        error = message
         generation = UUID(); operation?.cancel(); connectionStartup?.cancel(); connectionStartup = nil; speechReady = false
         capture.stop(); connection?.cancel(); connection = nil
         if output.isEmpty { output = rawText }
-        phase = .idle; level = 0; error = message
+        phase = .idle; level = 0
     }
     func copy() {
         if copyText() { notice = "Copied."; panelCompletion += 1 }

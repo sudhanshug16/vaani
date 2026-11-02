@@ -51,6 +51,7 @@ import VaaniCore
                 case "listening": model.rawText = ""; model.output = ""; model.phase = .listening; model.level = 0.7
                 case "processing": model.phase = .processing
                 case "result": model.rawText = "Kal office mein Vaani ka demo karna hai."; model.output = model.rawText; model.phase = .idle
+                case "credits-error": model.phase = .idle; model.error = "Streaming failed: Credits exhausted. Visit the API Dashboard to review and manage your subscription."
                 case "keychain-error": model.phase = .idle; model.error = "Keychain access needs approval. Approve the macOS prompt or choose Unlock saved keys in Voice."
                 case "error": model.phase = .idle; model.error = "The selected microphone disconnected. Your captured words are preserved. Choose another microphone to continue."
                 default: model.phase = .idle; model.rawText = ""; model.output = ""

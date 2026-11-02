@@ -818,3 +818,22 @@ All 130 Swift cases completed with two optional audio skips and zero failures, i
 User clarified that the input stall occurred while removing Vaani from Accessibility. Removed immediate tap re-enabling from the disabled-event callback. Readiness and registration now check current Accessibility trust; the normal retry releases previous tap/hot-key resources and refuses registration while trust is absent. Queued actions also check permission before firing. Returning from shortcut recording cannot reinstall a native hot key after revocation.
 
 The explicit logged-in native test injects permission loss, checks that readiness becomes false, runs the production retry path, verifies release using a competing OS hot-key registration, then restores trust and verifies recovery. A second test checks no modifier observer installs without permission. All 132 Swift cases completed, with two optional audio skips and no failures. These checks simulate the permission flag while exercising real OS hot-key resources; the actual protected macOS Accessibility removal dialog and the original machine-wide input stall have not been reproduced.
+
+## Actionable dictation errors (2026-11-03)
+
+A non-recording connection check in the Air's logged-in session confirmed Sarvam
+credit exhaustion after microphone startup. Failures now show a nonactivating
+compact error card with the cause, recovery action and dismiss control. Credit
+exhaustion links to Sarvam's current API dashboard; Settings retains the full
+technical message. Polishing failures are labelled separately from speech
+failures, and metadata logs persist only allowlisted cause codes.
+
+All 137 XCTest cases completed with four optional skips and zero failures,
+including the real provider-message classification, polishing raw-text recovery,
+and native error-card expansion/collapse without key/main-window focus. The
+installed CLT built the tests using Xcode's existing test libraries; the XCTest
+bundle was run directly because CLT SwiftPM did not discover XCTest cases.
+Screenshot verification was unavailable because the local Cua Driver lacked OS
+permissions. The release bundle verifies with the existing permanent signing
+requirement. Successful live dictation remains blocked until provider credits
+are replenished; this update does not add credits.

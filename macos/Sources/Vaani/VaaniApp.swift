@@ -376,7 +376,13 @@ struct SettingsView: View {
                 if let error = model.error ?? store.persistenceError {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "exclamationmark.circle.fill").foregroundStyle(accent)
-                        Text(error).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 6) {
+                            let issue = DictationIssue(error)
+                            Text(issue.title).font(.headline)
+                            Text(issue.recovery).font(.callout)
+                            if issue.dashboard { Button(issue.actionLabel, action: model.resolveError) }
+                            DisclosureGroup("Technical details") { Text(error).font(.caption).textSelection(.enabled) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
                         Button("Voice") { page = "Voice" }
                     }.padding(18).background(ink)
                 } else if model.phase == .connecting {

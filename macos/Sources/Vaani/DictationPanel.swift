@@ -19,9 +19,10 @@ final class DictationPanel: NSPanel {
 }
 
 enum FloatingPanelLayout {
-    static func size(active: Bool, controls: Bool) -> CGSize {
+    static func size(active: Bool, controls: Bool, error: Bool = false) -> CGSize {
+        if error { return CGSize(width: 350, height: 112) }
         // Face + optional two 16 pt controls/two 12 pt gaps + horizontal padding.
-        CGSize(width: (active ? 52 : 24) + (controls ? 56 : 0) + 30, height: 36)
+        return CGSize(width: (active ? 52 : 24) + (controls ? 56 : 0) + 30, height: 36)
     }
 }
 
@@ -74,13 +75,16 @@ struct FloatingView: View {
     @State private var hovered = false
     private let surface = Color(red: 0.10, green: 0.105, blue: 0.11)
     private var showsControls: Bool { model.active || hovered || model.isPasting }
-    private var layoutSize: CGSize { FloatingPanelLayout.size(active: model.active, controls: showsControls) }
+    private var layoutSize: CGSize { FloatingPanelLayout.size(active: model.active, controls: showsControls, error: model.error != nil && !model.active) }
 
     var body: some View {
-        pill
+        Group {
+            if let issue = model.errorIssue, !model.active { errorCard(issue) }
+            else { pill }
+        }
         .frame(width: layoutSize.width, height: layoutSize.height)
-        .background(surface.opacity(0.98), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.12)))
+        .background(surface.opacity(0.98), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12)))
         .fixedSize()
         .preferredColorScheme(.dark)
         // Derive native bounds from state, not GeometryReader's constrained
@@ -89,6 +93,25 @@ struct FloatingView: View {
         .onChange(of: layoutSize, initial: true) { _, size in resize(size) }
         .onHover { hovered = $0 }
         .help(model.error ?? model.statusNotice ?? "Drag to move · tap to dictate")
+    }
+
+    private func errorCard(_ issue: DictationIssue) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(issue.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Text(issue.recovery).font(.system(size: 11)).foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 12) {
+                    Button(issue.actionLabel, action: model.resolveError).foregroundStyle(.orange)
+                    if issue.dashboard { Button("Details") { model.showErrorDetails?() }.foregroundStyle(.white.opacity(0.8)) }
+                }.font(.system(size: 11, weight: .medium)).buttonStyle(.plain).padding(.top, 2)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: hide) { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                .buttonStyle(.plain).foregroundStyle(.white.opacity(0.7)).accessibilityLabel("Dismiss error")
+        }.padding(14)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Dictation error: \(issue.title)")
     }
 
     private var face: some View {

@@ -58,7 +58,8 @@ final class PolishingLifecycleTests: XCTestCase {
         try await waitUntil { !model.active }
         XCTAssertEqual(model.output, "Kal demo hai.")
         XCTAssertEqual(model.rawText, model.output)
-        XCTAssertEqual(model.error, "Provider unavailable. Raw text is preserved.")
+        XCTAssertEqual(model.error, "Polishing failed: Provider unavailable. Raw text is preserved.")
+        XCTAssertEqual(model.errorIssue?.diagnostic, .processing)
     }
     @MainActor func testCancelledLateSuccessCannotReplaceCapturedTextOrNotice() async throws {
         let pending = PendingCompletion(), model = try model(pending)

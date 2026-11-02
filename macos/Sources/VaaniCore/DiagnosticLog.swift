@@ -3,11 +3,12 @@ import Foundation
 /// Metadata only: callers cannot attach text, credentials, device names, or provider bodies.
 public final class DiagnosticLog: @unchecked Sendable {
     public enum Event: String, Codable {
-        case launch, command, phase, startup, failure, speechReady, speechEnded, speechEvent, audioFirstBuffer
+        case launch, command, phase, startup, failure, failureCause, speechReady, speechEnded, speechEvent, audioFirstBuffer
         case audioFirstSignal, finish, emptyTranscript, reviewRequired, cancel, pasteAttempt, pasteDispatched, pasteFailed
         case shortcutTriggered, shortcutRegistered, shortcutTapDisabled, commandRejected, deviceChange, deviceSettled, microphoneInventory, microphoneSelection, privateAggregatesFiltered
     }
     public enum Detail: String, Codable {
+        case creditsExhausted, keychainApproval, providerAuthentication, providerRateLimited, networkTimeout, networkUnavailable, unknownFailure
         case idle, connecting, listening, finishing, processing
         case destination, preferences, credentials, microphonePermission, speechConnection, microphoneStart
         case shortcut, panel, controls, dismiss, sessionEnded, requested, startupFailure, streamFailure, audioFailure, inputChanged
